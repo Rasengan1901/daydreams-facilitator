@@ -169,10 +169,15 @@ export class UptoEvmScheme implements SchemeNetworkFacilitator {
       };
     }
 
-    if (spenderAddress !== getAddress(requirements.payTo)) {
+    // The spender in the permit must be this facilitator (who will call transferFrom),
+    // NOT the payTo address (who receives the payment)
+    const facilitatorAddresses = this.signer
+      .getAddresses()
+      .map((a) => getAddress(a));
+    if (!facilitatorAddresses.includes(spenderAddress)) {
       return {
         isValid: false,
-        invalidReason: "recipient_mismatch",
+        invalidReason: "spender_not_facilitator",
         payer,
       };
     }

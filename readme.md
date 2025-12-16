@@ -1,126 +1,282 @@
-# x402 Facilitator Example
+# x402 Facilitator
 
-Elysia facilitator service (Node runtime) that verifies and settles payments on-chain for the x402 protocol.
+A production-ready payment settlement service for the [x402 protocol](https://github.com/coinbase/x402). Built with Elysia and Node.js, it verifies cryptographic payment signatures and settles transactions on-chain for EVM (Base) and SVM (Solana) networks.
 
-## Prerequisites
+## Table of Contents
 
-- Node.js v20+ (install via [nvm](https://github.com/nvm-sh/nvm))
-- pnpm v10 (install via [pnpm.io/installation](https://pnpm.io/installation))
-- EVM private key with Base ETH for transaction fees
-- SVM private key with Solana Devnet SOL for transaction fees
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Custom Signers](#custom-signers)
+- [API Reference](#api-reference)
+- [Payment Schemes](#payment-schemes)
+- [Extending the Facilitator](#extending-the-facilitator)
+- [Testing](#testing)
+- [Production Deployment](#production-deployment)
 
-## Setup
+## Overview
 
-1. Copy `.env-local` to `.env`:
+The x402 Facilitator acts as a trusted intermediary between clients making payments and resource servers providing paid content. It:
 
-```bash
-cp .env-local .env
+1. **Verifies** payment signatures and authorizations
+2. **Settles** transactions on-chain (EVM/Solana)
+3. **Manages** batched payment sessions for efficient settlement (upto scheme)
+
+### Supported Networks
+
+| Network | CAIP-2 Identifier | Schemes |
+|---------|-------------------|---------|
+| Base Mainnet | `eip155:8453` | exact, upto |
+| Base Sepolia | `eip155:84532` | exact, upto |
+| Ethereum | `eip155:1` | exact, upto |
+| Optimism | `eip155:10` | exact, upto |
+| Arbitrum | `eip155:42161` | exact, upto |
+| Polygon | `eip155:137` | exact, upto |
+| Solana Devnet | `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` | exact |
+| Solana Mainnet | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | exact |
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         x402 Facilitator                            │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐          │
+│  │   /verify    │    │   /settle    │    │  /supported  │          │
+│  └──────┬───────┘    └──────┬───────┘    └──────────────┘          │
+│         │                   │                                       │
+│         ▼                   ▼                                       │
+│  ┌─────────────────────────────────────────────────────┐           │
+│  │              Payment Scheme Registry                 │           │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │           │
+│  │  │ Exact (EVM) │  │ Upto (EVM)  │  │ Exact (SVM) │  │           │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  │           │
+│  └─────────────────────────────────────────────────────┘           │
+│                              │                                      │
+│         ┌────────────────────┼────────────────────┐                │
+│         ▼                    ▼                    ▼                │
+│  ┌─────────────┐      ┌─────────────┐      ┌─────────────┐        │
+│  │ EVM Signer  │      │ SVM Signer  │      │Session Store│        │
+│  │ (Viem/CDP)  │      │(Solana Kit) │      │ (In-Memory) │        │
+│  └──────┬──────┘      └──────┬──────┘      └──────┬──────┘        │
+│         │                    │                    │                │
+└─────────┼────────────────────┼────────────────────┼────────────────┘
+          │                    │                    │
+          ▼                    ▼                    ▼
+   ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+   │  EVM RPC    │      │ Solana RPC  │      │  Sweeper    │
+   └─────────────┘      └─────────────┘      └─────────────┘
 ```
 
-and fill required environment variables:
+### Core Components
 
-- `EVM_PRIVATE_KEY` - Ethereum private key
-- `SVM_PRIVATE_KEY` - Solana private key
-- `PORT` - facilitator server port (optional, defaults to 8090). If you also run `examples/paidApi.ts` on 8090, set this to something else (e.g. 4022).
-- `FACILITATOR_URL` (optional) - override the facilitator URL used by `examples/paidApi.ts` (defaults to `http://localhost:$PORT`)
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| HTTP Server | `src/app.ts` | Elysia server with endpoints and middleware |
+| Facilitator Factory | `src/setup.ts` | `createFacilitator()` with signer injection |
+| Default Signers | `src/signers/default.ts` | EVM/SVM wallet from env vars |
+| CDP Signer | `src/signers/cdp.ts` | Coinbase Developer Platform adapter |
+| Upto Scheme | `src/upto/evm/facilitator.ts` | Permit-based batched payments |
+| Session Store | `src/upto/store.ts` | In-memory session management |
+| Sweeper | `src/upto/sweeper.ts` | Background batch settlement |
 
-2. Install and build all packages from the typescript examples root:
+### Data Flow
+
+**Exact Payment (Immediate Settlement)**
+```
+Client → POST /verify → Signature validation → VerifyResponse
+Client → POST /settle → On-chain transfer → SettleResponse (tx hash)
+```
+
+**Upto Payment (Batched Settlement)**
+```
+Client → POST /verify → Permit validation → Session created/updated
+              ↓
+         Accumulate pending spend across requests
+              ↓
+         Sweeper triggers → POST /settle (batch) → Reset pending
+```
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js v20+
+- [Bun](https://bun.sh) runtime
+- EVM private key with Base ETH for gas (or CDP account)
+- SVM private key with SOL for fees (optional)
+
+### Installation
 
 ```bash
-cd ../../
-pnpm install && pnpm build
+# Clone and install
+git clone <repository-url>
 cd facilitator
+bun install
+
+# Configure environment
+cp .env-local .env
+# Edit .env with your private keys
+
+# Start development server
+bun dev
 ```
 
-3. Run the server:
+The server starts at `http://localhost:8090`.
+
+### Verify Installation
 
 ```bash
-pnpm dev
+curl http://localhost:8090/supported
 ```
 
-### Smoke test client (upto)
+## Configuration
 
-This repo includes a tiny client under `examples/smokeClient.ts` to hit the demo upto endpoint and settle a batch.
+### Environment Variables
 
-Start the services in two terminals:
+**Default Signer (Private Key)**
 
-1. Facilitator:
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `EVM_PRIVATE_KEY` | Yes* | - | Ethereum private key (hex format) |
+| `SVM_PRIVATE_KEY` | Yes* | - | Solana private key (Base58 format) |
+| `PORT` | No | `8090` | Server port |
+| `EVM_RPC_URL_BASE` | No | - | Custom RPC URL for Base |
 
-```bash
-pnpm dev
-```
+*Required when using default signers. Not needed with CDP signer.
 
-2. Paid API:
+**CDP Signer (Coinbase Developer Platform)**
 
-```bash
-pnpm smoke:api
-```
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `CDP_API_KEY_ID` | Yes | - | CDP API key ID |
+| `CDP_API_KEY_SECRET` | Yes | - | CDP API key secret |
+| `CDP_WALLET_SECRET` | Yes | - | CDP wallet secret |
 
-1. Export a funded EOA private key for the payer:
+### OpenTelemetry (Optional)
 
-```bash
-export CLIENT_EVM_PRIVATE_KEY="0x..."
-```
-
-2. (Optional) set a Base mainnet RPC URL:
-
-```bash
-export RPC_URL="https://mainnet.base.org"
-```
-
-3. Run the smoke client:
-
-```bash
-pnpm smoke:upto
-```
-
-The client will:
-- call `GET /api/upto-premium` without payment to receive a 402
-- sign and cache a Permit for the cap
-- make 3 paid requests to accrue spend
-- call `POST /api/upto-close` to force a batch settle
-- print session state before/after
-
-## OpenTelemetry (optional)
-
-Tracing is enabled via `@elysiajs/opentelemetry` and exports spans using OTLP over HTTP/protobuf.
-
-Set any standard OpenTelemetry env vars, for example:
+Enable distributed tracing:
 
 ```bash
 export OTEL_SERVICE_NAME="x402-facilitator"
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
 ```
 
-## API Endpoints
+## Custom Signers
+
+The facilitator supports pluggable signers via the `createFacilitator()` factory.
+
+### Using the Factory
+
+```typescript
+import { createFacilitator } from "./setup.js";
+import { evmSigner, svmSigner } from "./signers/index.js";
+
+const facilitator = createFacilitator({
+  evmSigners: [
+    {
+      signer: evmSigner,
+      networks: ["eip155:8453", "eip155:84532"],
+      schemes: ["exact", "upto"],
+    },
+  ],
+  svmSigners: [
+    {
+      signer: svmSigner,
+      networks: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+    },
+  ],
+  hooks: {
+    onAfterSettle: async (ctx) => console.log("Settled:", ctx),
+  },
+});
+```
+
+### CDP Signer (Coinbase Developer Platform)
+
+Use [Coinbase Developer Platform](https://portal.cdp.coinbase.com/) for managed key custody:
+
+```bash
+bun add @coinbase/cdp-sdk
+```
+
+```typescript
+import { CdpClient } from "@coinbase/cdp-sdk";
+import { createCdpEvmSigner, createFacilitator } from "./setup.js";
+
+// Initialize CDP (uses env vars by default)
+const cdp = new CdpClient();
+const account = await cdp.evm.getOrCreateAccount({ name: "facilitator" });
+
+// Create signer for Base
+const cdpSigner = createCdpEvmSigner({
+  cdpClient: cdp,
+  account,
+  network: "base",
+  rpcUrl: process.env.EVM_RPC_URL_BASE,
+});
+
+// Create facilitator
+const facilitator = createFacilitator({
+  evmSigners: [
+    { signer: cdpSigner, networks: "eip155:8453", schemes: ["exact", "upto"] },
+  ],
+});
+```
+
+### Multi-Network CDP Setup
+
+```typescript
+import { createMultiNetworkCdpSigners, createFacilitator } from "./setup.js";
+
+const signers = createMultiNetworkCdpSigners({
+  cdpClient: cdp,
+  account,
+  networks: {
+    base: process.env.EVM_RPC_URL_BASE,
+    "base-sepolia": process.env.BASE_SEPOLIA_RPC_URL,
+    optimism: process.env.OPTIMISM_RPC_URL,
+  },
+});
+
+const facilitator = createFacilitator({
+  evmSigners: [
+    { signer: signers.base!, networks: "eip155:8453" },
+    { signer: signers["base-sepolia"]!, networks: "eip155:84532" },
+    { signer: signers.optimism!, networks: "eip155:10" },
+  ],
+});
+```
+
+### CDP Network Mapping
+
+| CDP Network | CAIP-2 | Chain ID |
+|-------------|--------|----------|
+| `base` | `eip155:8453` | 8453 |
+| `base-sepolia` | `eip155:84532` | 84532 |
+| `ethereum` | `eip155:1` | 1 |
+| `ethereum-sepolia` | `eip155:11155111` | 11155111 |
+| `optimism` | `eip155:10` | 10 |
+| `arbitrum` | `eip155:42161` | 42161 |
+| `polygon` | `eip155:137` | 137 |
+| `avalanche` | `eip155:43114` | 43114 |
+
+## API Reference
 
 ### GET /supported
 
-Returns payment schemes and networks this facilitator supports.
+Returns supported payment schemes and networks.
 
+**Response:**
 ```json
 {
   "kinds": [
-	    {
-	      "x402Version": 2,
-	      "scheme": "exact",
-	      "network": "eip155:8453"
-	    },
-	    {
-	      "x402Version": 2,
-	      "scheme": "upto",
-	      "network": "eip155:8453"
-	    },
-    {
-      "x402Version": 2,
-      "scheme": "exact",
-      "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
-      "extra": {
-        "feePayer": "..."
-      }
-    }
+    { "x402Version": 2, "scheme": "exact", "network": "eip155:8453" },
+    { "x402Version": 2, "scheme": "upto", "network": "eip155:8453" },
+    { "x402Version": 2, "scheme": "exact", "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1" }
   ],
-  "extensions": [],
   "signers": {
     "eip155": ["0x..."],
     "solana": ["..."]
@@ -130,201 +286,296 @@ Returns payment schemes and networks this facilitator supports.
 
 ### POST /verify
 
-Verifies a payment payload against requirements before settlement.
+Validates a payment signature against requirements.
 
-Request:
-
+**Request:**
 ```json
 {
   "paymentPayload": {
     "x402Version": 2,
-    "resource": {
-      "url": "http://localhost:4021/weather",
-      "description": "Weather data",
-      "mimeType": "application/json"
+    "resource": { "url": "...", "description": "...", "mimeType": "..." },
+    "accepted": {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "amount": "1000",
+      "payTo": "0x..."
     },
-	    "accepted": {
-	      "scheme": "exact",
-	      "network": "eip155:8453",
-	      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-	      "amount": "1000",
-	      "payTo": "0x...",
-	      "maxTimeoutSeconds": 300,
-	      "extra": {
-	        "name": "USD Coin",
-	        "version": "2"
-	      }
-	    },
-    "payload": {
-      "signature": "0x...",
-      "authorization": {}
-    }
+    "payload": { "signature": "0x...", "authorization": {} }
   },
-	  "paymentRequirements": {
-	    "scheme": "exact",
-	    "network": "eip155:8453",
-	    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-	    "amount": "1000",
-	    "payTo": "0x...",
-	    "maxTimeoutSeconds": 300,
-	    "extra": {
-	      "name": "USD Coin",
-	      "version": "2"
-	    }
-	  }
-	}
-```
-
-Response (success):
-
-```json
-{
-  "isValid": true,
-  "payer": "0x..."
+  "paymentRequirements": {
+    "scheme": "exact",
+    "network": "eip155:8453",
+    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "amount": "1000",
+    "payTo": "0x..."
+  }
 }
 ```
 
-Response (failure):
-
+**Response (Success):**
 ```json
-{
-  "isValid": false,
-  "invalidReason": "invalid_signature"
-}
+{ "isValid": true, "payer": "0x..." }
+```
+
+**Response (Failure):**
+```json
+{ "isValid": false, "invalidReason": "invalid_signature" }
 ```
 
 ### POST /settle
 
-Settles a verified payment by broadcasting the transaction on-chain.
+Executes on-chain payment settlement.
 
-Request body is identical to `/verify`.
+**Request:** Same as `/verify`
 
-Response (success):
-
+**Response (Success):**
 ```json
-	{
-	  "success": true,
-	  "transaction": "0x...",
-	  "network": "eip155:8453",
-	  "payer": "0x..."
-	}
+{
+  "success": true,
+  "transaction": "0x...",
+  "network": "eip155:8453",
+  "payer": "0x..."
+}
 ```
 
-Response (failure):
-
+**Response (Failure):**
 ```json
-	{
-	  "success": false,
-	  "errorReason": "insufficient_balance",
-	  "transaction": "",
-	  "network": "eip155:8453"
-	}
+{
+  "success": false,
+  "errorReason": "insufficient_balance",
+  "network": "eip155:8453"
+}
 ```
 
-## Paywalled demo routes (v2)
+## Payment Schemes
 
-This example also includes a tiny paid resource API using `x402ResourceServer` + `x402HTTPResourceServer`
-pointing at this facilitator:
+### Exact Scheme
 
-- `GET /api/premium` (EVM exact, Base Mainnet)
-- `GET /api/premium-solana` (SVM exact, Solana Devnet)
-- `GET /api/upto-premium` (EVM upto, Base Mainnet, batched settlement)
-- `POST /api/upto-close` (settle an upto session)
+Immediate, single-transaction settlement. Each payment request results in one on-chain transfer.
 
-Clients should use the v2 stack (`@x402/core` + `@x402/evm|svm` + optionally `@x402/fetch`) to
-handle 402 responses, send `PAYMENT-SIGNATURE`, and read `PAYMENT-RESPONSE` (v1 used `X-PAYMENT` / `X-PAYMENT-RESPONSE`).
+**Supported tokens:**
+- USDC on Base (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`)
+- SPL tokens on Solana
 
-### Upto scheme (batched payments)
+### Upto Scheme (Batched Payments)
 
-`scheme: "upto"` is a Permit/allowance-based flow for EVM tokens:
+Permit-based flow for efficient EVM token payments:
 
-1. The resource server returns a 402 with per‑request price in `amount` and a cap in `extra.maxAmountRequired`.
-2. The client signs an ERC‑2612 Permit once for that cap, sends it in `PAYMENT-SIGNATURE`, and caches it.
-3. Subsequent requests reuse the same cached `PAYMENT-SIGNATURE`. The resource server:
-   - verifies the Permit each request via `/verify`
-   - tracks spend in an in‑memory session (pending vs settled)
-   - allows requests until `settledTotal + pendingSpent + price > cap`
-   - returns `x-upto-session-id` on successful requests
-4. The server automatically settles a batch by calling facilitator `/settle` once with
-   `amount = pendingSpent` when any of these triggers fire:
-   - idle timeout (no activity for a while)
-   - near Permit deadline
-   - near cap threshold (demo uses ~90%)
-   After a successful batch, `pendingSpent` resets to 0 and the session stays open
-   until cap/deadline are reached.
-5. Optional manual close: client may call `POST /api/upto-close` with `{ "sessionId": "..." }`
-   to force a final batch and close the session.
-   Use `GET /api/upto-session/:id` to inspect session state and see the last receipt.
+1. **Client signs once** - ERC-2612 Permit for a cap amount
+2. **Multiple requests** - Reuse the same Permit signature
+3. **Automatic batching** - Sweeper settles accumulated spend
+4. **Settlement triggers:**
+   - Idle timeout (2 minutes of inactivity)
+   - Deadline buffer (60 seconds before Permit expires)
+   - Cap threshold (90% of cap reached)
 
-Notes/limitations:
+**Session Lifecycle:**
+```
+┌─────────┐     verify      ┌─────────┐     sweep/close     ┌─────────┐
+│  None   │ ───────────────▶│  Open   │ ──────────────────▶ │ Closed  │
+└─────────┘                 └────┬────┘                     └─────────┘
+                                 │ settle
+                                 ▼
+                            ┌─────────┐
+                            │Settling │
+                            └────┬────┘
+                                 │ success
+                                 ▼
+                            Back to Open (if cap/deadline allow)
+```
 
-- Works only for ERC‑2612 Permit tokens (demo assumes USDC on Base Mainnet).  
-  It does **not** work for EIP‑3009 “transferWithAuthorization” tokens.
-- EOA ECDSA signatures only (no Permit2, no smart‑wallet/EIP‑1271/EIP‑6492 support yet).
-- Demo session storage is an in‑memory `Map`; restart loses sessions.
-- `maxAmountRequired` and `amount` are in base units (USDC = 6 decimals).
+**Limitations:**
+- ERC-2612 Permit tokens only (not EIP-3009)
+- EOA signatures only (no smart wallets/EIP-1271)
+- In-memory sessions (lost on restart)
 
-## Extending the Example
+## Extending the Facilitator
 
 ### Adding Networks
 
-Register additional schemes for other networks:
-
 ```typescript
-import { registerExactEvmScheme } from "@x402/evm/exact/facilitator";
-import { registerExactSvmScheme } from "@x402/svm/exact/facilitator";
-import { registerUptoEvmScheme } from "./schemes/upto/evm/registerFacilitator.js";
+import { createFacilitator } from "./setup.js";
 
-const facilitator = new x402Facilitator();
-
-registerExactEvmScheme(facilitator, {
-  signer: evmSigner,
-  networks: "eip155:8453",
-});
-
-registerUptoEvmScheme(facilitator, {
-  signer: evmSigner,
-  networks: "eip155:8453",
-});
-
-registerExactSvmScheme(facilitator, {
-  signer: svmSigner,
-  networks: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+const facilitator = createFacilitator({
+  evmSigners: [
+    {
+      signer: evmSigner,
+      networks: ["eip155:8453", "eip155:10", "eip155:42161"], // Base + Optimism + Arbitrum
+      schemes: ["exact", "upto"],
+    },
+  ],
 });
 ```
 
 ### Lifecycle Hooks
 
-Add custom logic before/after verify and settle operations:
+Add custom logic at key points:
 
 ```typescript
-const facilitator = new x402Facilitator()
-  .onBeforeVerify(async (context) => {
-    // Log or validate before verification
-  })
-  .onAfterVerify(async (context) => {
-    // Track verified payments
-  })
-  .onVerifyFailure(async (context) => {
-    // Handle verification failures
-  })
-  .onBeforeSettle(async (context) => {
-    // Validate before settlement
-    // Return { abort: true, reason: "..." } to cancel
-  })
-  .onAfterSettle(async (context) => {
-    // Track successful settlements
-  })
-  .onSettleFailure(async (context) => {
-    // Handle settlement failures
-  });
+const facilitator = createFacilitator({
+  evmSigners: [{ signer, networks: "eip155:8453" }],
+  hooks: {
+    onBeforeVerify: async (ctx) => {
+      // Rate limiting, logging
+    },
+    onAfterVerify: async (ctx) => {
+      // Track verified payments
+    },
+    onBeforeSettle: async (ctx) => {
+      // Validate before settlement
+    },
+    onAfterSettle: async (ctx) => {
+      // Analytics, notifications
+    },
+    onSettleFailure: async (ctx) => {
+      // Alerting, retry logic
+    },
+  },
+});
+```
+
+### Custom Session Store
+
+Replace in-memory storage with persistent storage:
+
+```typescript
+import { UptoSessionStore } from "./upto/store.js";
+
+class RedisSessionStore implements UptoSessionStore {
+  async get(id: string) { /* Redis get */ }
+  async set(id: string, session: UptoSession) { /* Redis set */ }
+  async delete(id: string) { /* Redis del */ }
+  async entries() { /* Redis scan */ }
+}
+```
+
+### Custom Signer Adapter
+
+Create adapters for other wallet providers:
+
+```typescript
+import { toFacilitatorEvmSigner } from "@x402/evm";
+
+const customSigner = toFacilitatorEvmSigner({
+  address: wallet.address,
+  getCode: (args) => publicClient.getCode(args),
+  readContract: (args) => publicClient.readContract(args),
+  writeContract: (args) => wallet.writeContract(args),
+  verifyTypedData: (args) => publicClient.verifyTypedData(args),
+  sendTransaction: (args) => wallet.sendTransaction(args),
+  waitForTransactionReceipt: (args) => publicClient.waitForTransactionReceipt(args),
+});
+```
+
+## Testing
+
+```bash
+# Run tests
+bun test
+
+# Watch mode
+bun test:watch
+
+# Coverage
+bun test:coverage
+```
+
+### Smoke Testing
+
+1. Start the facilitator:
+   ```bash
+   bun dev
+   ```
+
+2. Start the demo paid API:
+   ```bash
+   bun smoke:api
+   ```
+
+3. Run the smoke client:
+   ```bash
+   export CLIENT_EVM_PRIVATE_KEY="0x..."
+   bun smoke:upto
+   ```
+
+## Production Deployment
+
+### Security Considerations
+
+1. **Private Key Management**
+   - Use CDP for managed custody (recommended)
+   - Or use secrets managers (AWS Secrets Manager, HashiCorp Vault)
+   - Never commit `.env` files with real keys
+   - Rotate keys periodically
+
+2. **Network Security**
+   - Run behind a reverse proxy (nginx, Cloudflare)
+   - Enable TLS/HTTPS
+   - Implement rate limiting
+
+3. **Signature Validation**
+   - All signatures verified via EIP-712 typed data
+   - Permit deadlines enforced with buffer
+   - Network/chain ID validation prevents replay attacks
+
+### Scaling
+
+1. **Session Persistence**
+   - Replace `InMemoryUptoSessionStore` with Redis/PostgreSQL
+   - Required for multi-instance deployments
+
+2. **RPC Resilience**
+   - Configure multiple RPC endpoints
+   - Implement retry logic with exponential backoff
+   - Consider RPC providers with built-in failover
+
+3. **Monitoring**
+   - Enable OpenTelemetry tracing
+   - Set up alerts for settlement failures
+   - Monitor transaction costs and gas prices
+
+### Example Deployment
+
+```yaml
+# docker-compose.yml
+services:
+  facilitator:
+    build: .
+    environment:
+      # Option 1: CDP (recommended)
+      - CDP_API_KEY_ID=${CDP_API_KEY_ID}
+      - CDP_API_KEY_SECRET=${CDP_API_KEY_SECRET}
+      - CDP_WALLET_SECRET=${CDP_WALLET_SECRET}
+      # Option 2: Raw private keys
+      # - EVM_PRIVATE_KEY=${EVM_PRIVATE_KEY}
+      # - SVM_PRIVATE_KEY=${SVM_PRIVATE_KEY}
+      - PORT=8090
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/supported"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 ```
 
 ## Network Identifiers
 
 Networks use [CAIP-2](https://github.com/ChainAgnostic/CAIPs/blob/main/CAIPs/caip-2.md) format:
 
-- `eip155:84532` — Base Sepolia
-- `eip155:8453` — Base Mainnet
-- `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` — Solana Devnet
-- `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` — Solana Mainnet
+| Network | Identifier |
+|---------|------------|
+| Ethereum Mainnet | `eip155:1` |
+| Base Mainnet | `eip155:8453` |
+| Base Sepolia | `eip155:84532` |
+| Optimism | `eip155:10` |
+| Arbitrum | `eip155:42161` |
+| Polygon | `eip155:137` |
+| Solana Devnet | `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` |
+| Solana Mainnet | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` |
+
+## License
+
+MIT

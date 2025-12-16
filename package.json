@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@bogeychan/elysia-logger": "^0.1.10",
+    "@coinbase/cdp-sdk": "^1.40.1",
     "@elysiajs/node": "^1.0.0",
     "@elysiajs/opentelemetry": "^1.4.9",
     "@opentelemetry/exporter-trace-otlp-proto": "^0.208.0",

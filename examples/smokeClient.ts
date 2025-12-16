@@ -13,6 +13,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
 
 const BASE_URL = process.env.BASE_URL ?? "http://localhost:4022";
+const FACILITATOR_URL = process.env.FACILITATOR_URL ?? "http://localhost:8090";
 const CLIENT_EVM_PRIVATE_KEY = process.env.CLIENT_EVM_PRIVATE_KEY;
 
 if (!CLIENT_EVM_PRIVATE_KEY) {
@@ -38,6 +39,28 @@ const noncesAbi = [
   },
 ] as const;
 
+// Cache for facilitator signer address
+let facilitatorSignerAddress: `0x${string}` | null = null;
+
+async function getFacilitatorSigner(network: string): Promise<`0x${string}`> {
+  if (facilitatorSignerAddress) return facilitatorSignerAddress;
+
+  const supported = await fetch(`${FACILITATOR_URL}/supported`).then((r) =>
+    r.json()
+  ) as { signers?: Record<string, string[]> };
+
+  // Try exact network match first, then wildcard
+  const signers =
+    supported.signers?.[network] ?? supported.signers?.["eip155:*"] ?? [];
+  if (signers.length === 0) {
+    throw new Error(`No facilitator signer found for network ${network}`);
+  }
+
+  facilitatorSignerAddress = getAddress(signers[0]) as `0x${string}`;
+  console.log("Facilitator signer:", facilitatorSignerAddress);
+  return facilitatorSignerAddress;
+}
+
 type PermitCacheEntry = {
   paymentPayload: PaymentPayload;
   cap: bigint;
@@ -46,13 +69,16 @@ type PermitCacheEntry = {
 
 const permitCache = new Map<string, PermitCacheEntry>();
 
-function getCacheKey(req: PaymentRequirements) {
+async function getCacheKey(req: PaymentRequirements) {
   const chainId = req.network.split(":")[1];
+  const facilitator = await getFacilitatorSigner(req.network);
+  // Cache key is based on facilitator (spender), not payTo
+  // because the permit authorizes the facilitator to spend on our behalf
   return [
     chainId,
     getAddress(req.asset),
     getAddress(account.address),
-    getAddress(req.payTo),
+    facilitator,
   ].join(":");
 }
 
@@ -74,7 +100,7 @@ async function createUptoPaymentPayload(
     throw new Error("Requirement missing ERC-2612 domain name/version");
   }
 
-  const key = getCacheKey(requirement);
+  const key = await getCacheKey(requirement);
   const cached = permitCache.get(key);
   const nowSec = BigInt(Math.floor(Date.now() / 1000));
   if (
@@ -86,7 +112,9 @@ async function createUptoPaymentPayload(
   }
 
   const owner = getAddress(account.address);
-  const spender = getAddress(requirement.payTo);
+  // IMPORTANT: The spender must be the facilitator (who executes transferFrom),
+  // NOT payTo (who receives the payment)
+  const spender = await getFacilitatorSigner(requirement.network);
   const asset = getAddress(requirement.asset);
   const chainId = Number(requirement.network.split(":")[1]);
 
