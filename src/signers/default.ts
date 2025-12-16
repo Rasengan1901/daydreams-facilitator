@@ -1,3 +1,8 @@
+/**
+ * Default signers using raw private keys.
+ * Only loaded when CDP credentials are not configured.
+ */
+
 import { base58 } from "@scure/base";
 import { createKeyPairSignerFromBytes } from "@solana/kit";
 import { toFacilitatorEvmSigner } from "@x402/evm";
@@ -6,9 +11,15 @@ import { createWalletClient, http, publicActions } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
 
-import { EVM_PRIVATE_KEY, SVM_PRIVATE_KEY } from "./config.js";
+import { EVM_PRIVATE_KEY, SVM_PRIVATE_KEY } from "../config.js";
 
-const normalizedEvmKey = EVM_PRIVATE_KEY?.startsWith("0x")
+if (!EVM_PRIVATE_KEY || !SVM_PRIVATE_KEY) {
+  throw new Error(
+    "Private key signers require EVM_PRIVATE_KEY and SVM_PRIVATE_KEY environment variables"
+  );
+}
+
+const normalizedEvmKey = EVM_PRIVATE_KEY.startsWith("0x")
   ? EVM_PRIVATE_KEY
   : `0x${EVM_PRIVATE_KEY}`;
 

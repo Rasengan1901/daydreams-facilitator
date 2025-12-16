@@ -11,7 +11,7 @@ import { UptoEvmServerScheme } from "../src/upto/evm/serverScheme.js";
 import { createHash } from "node:crypto";
 import type { PaymentPayload } from "@x402/core/types";
 
-import { evmAccount, svmAccount } from "../src/signers.js";
+import { evmAccount, svmAccount } from "../src/signers/index.js";
 import { settleUptoSession } from "../src/upto/settlement.js";
 import {
   InMemoryUptoSessionStore,
