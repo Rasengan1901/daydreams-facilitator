@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { UptoEvmScheme } from "../../src/schemes/upto/evm/facilitator.js";
+import { UptoEvmScheme } from "../../src/upto/evm/facilitator.js";
 import type { FacilitatorEvmSigner } from "@x402/evm";
 import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 
@@ -7,46 +7,58 @@ const MOCK_OWNER = "0x1234567890123456789012345678901234567890" as const;
 const MOCK_SPENDER = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd" as const;
 const MOCK_ASSET = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
 
-const createMockSigner = (overrides: Partial<FacilitatorEvmSigner> = {}): FacilitatorEvmSigner => ({
-  getAddresses: () => [MOCK_SPENDER],
-  verifyTypedData: mock(() => Promise.resolve(true)),
-  readContract: mock(() => Promise.resolve(1000000n)),
-  writeContract: mock(() => Promise.resolve("0xtxhash")),
-  waitForTransactionReceipt: mock(() => Promise.resolve({ status: "success" })),
-  ...overrides,
-} as unknown as FacilitatorEvmSigner);
+const createMockSigner = (
+  overrides: Partial<FacilitatorEvmSigner> = {}
+): FacilitatorEvmSigner =>
+  ({
+    getAddresses: () => [MOCK_SPENDER],
+    verifyTypedData: mock(() => Promise.resolve(true)),
+    readContract: mock(() => Promise.resolve(1000000n)),
+    writeContract: mock(() => Promise.resolve("0xtxhash")),
+    waitForTransactionReceipt: mock(() =>
+      Promise.resolve({ status: "success" })
+    ),
+    ...overrides,
+  }) as unknown as FacilitatorEvmSigner;
 
-const createValidPayload = (overrides: Partial<PaymentPayload> = {}): PaymentPayload => ({
-  accepted: {
+const createValidPayload = (
+  overrides: Partial<PaymentPayload> = {}
+): PaymentPayload =>
+  ({
+    accepted: {
+      scheme: "upto",
+      network: "eip155:8453",
+      ...overrides.accepted,
+    },
+    payload: {
+      authorization: {
+        from: MOCK_OWNER,
+        to: MOCK_SPENDER,
+        value: "1000000",
+        validBefore: String(Math.floor(Date.now() / 1000) + 3600),
+        nonce: "0",
+      },
+      signature:
+        "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1b",
+      ...overrides.payload,
+    },
+  }) as PaymentPayload;
+
+const createValidRequirements = (
+  overrides: Partial<PaymentRequirements> = {}
+): PaymentRequirements =>
+  ({
     scheme: "upto",
     network: "eip155:8453",
-    ...overrides.accepted,
-  },
-  payload: {
-    authorization: {
-      from: MOCK_OWNER,
-      to: MOCK_SPENDER,
-      value: "1000000",
-      validBefore: String(Math.floor(Date.now() / 1000) + 3600),
-      nonce: "0",
+    asset: MOCK_ASSET,
+    amount: "100000",
+    payTo: MOCK_SPENDER,
+    extra: {
+      name: "USD Coin",
+      version: "2",
     },
-    signature: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1b",
-    ...overrides.payload,
-  },
-} as PaymentPayload);
-
-const createValidRequirements = (overrides: Partial<PaymentRequirements> = {}): PaymentRequirements => ({
-  scheme: "upto",
-  network: "eip155:8453",
-  asset: MOCK_ASSET,
-  amount: "100000",
-  payTo: MOCK_SPENDER,
-  extra: {
-    name: "USD Coin",
-    version: "2",
-  },
-  ...overrides,
-} as PaymentRequirements);
+    ...overrides,
+  }) as PaymentRequirements;
 
 describe("UptoEvmScheme", () => {
   let scheme: UptoEvmScheme;
@@ -131,7 +143,8 @@ describe("UptoEvmScheme", () => {
 
       it("rejects missing owner (from)", async () => {
         const payload = createValidPayload();
-        const auth = (payload.payload as Record<string, unknown>).authorization as Record<string, unknown>;
+        const auth = (payload.payload as Record<string, unknown>)
+          .authorization as Record<string, unknown>;
         auth.from = undefined;
         const requirements = createValidRequirements();
 
@@ -143,7 +156,8 @@ describe("UptoEvmScheme", () => {
 
       it("rejects missing nonce", async () => {
         const payload = createValidPayload();
-        const auth = (payload.payload as Record<string, unknown>).authorization as Record<string, unknown>;
+        const auth = (payload.payload as Record<string, unknown>)
+          .authorization as Record<string, unknown>;
         auth.nonce = undefined;
         const requirements = createValidRequirements();
 
@@ -155,7 +169,8 @@ describe("UptoEvmScheme", () => {
 
       it("rejects missing validBefore", async () => {
         const payload = createValidPayload();
-        const auth = (payload.payload as Record<string, unknown>).authorization as Record<string, unknown>;
+        const auth = (payload.payload as Record<string, unknown>)
+          .authorization as Record<string, unknown>;
         auth.validBefore = undefined;
         const requirements = createValidRequirements();
 
@@ -167,7 +182,8 @@ describe("UptoEvmScheme", () => {
 
       it("rejects missing value", async () => {
         const payload = createValidPayload();
-        const auth = (payload.payload as Record<string, unknown>).authorization as Record<string, unknown>;
+        const auth = (payload.payload as Record<string, unknown>)
+          .authorization as Record<string, unknown>;
         auth.value = undefined;
         const requirements = createValidRequirements();
 
@@ -232,7 +248,8 @@ describe("UptoEvmScheme", () => {
     describe("cap validation", () => {
       it("rejects when cap is below required amount", async () => {
         const payload = createValidPayload();
-        const auth = (payload.payload as Record<string, unknown>).authorization as Record<string, unknown>;
+        const auth = (payload.payload as Record<string, unknown>)
+          .authorization as Record<string, unknown>;
         auth.value = "50000"; // cap = 50000
         const requirements = createValidRequirements();
         requirements.amount = "100000"; // required = 100000
@@ -245,7 +262,8 @@ describe("UptoEvmScheme", () => {
 
       it("accepts when cap equals required amount", async () => {
         const payload = createValidPayload();
-        const auth = (payload.payload as Record<string, unknown>).authorization as Record<string, unknown>;
+        const auth = (payload.payload as Record<string, unknown>)
+          .authorization as Record<string, unknown>;
         auth.value = "100000";
         const requirements = createValidRequirements();
         requirements.amount = "100000";
@@ -257,11 +275,13 @@ describe("UptoEvmScheme", () => {
 
       it("rejects when cap is below maxAmountRequired", async () => {
         const payload = createValidPayload();
-        const auth = (payload.payload as Record<string, unknown>).authorization as Record<string, unknown>;
+        const auth = (payload.payload as Record<string, unknown>)
+          .authorization as Record<string, unknown>;
         auth.value = "500000"; // cap
         const requirements = createValidRequirements();
         requirements.amount = "100000";
-        (requirements.extra as Record<string, unknown>).maxAmountRequired = "1000000";
+        (requirements.extra as Record<string, unknown>).maxAmountRequired =
+          "1000000";
 
         const result = await scheme.verify(payload, requirements);
 
@@ -273,7 +293,8 @@ describe("UptoEvmScheme", () => {
     describe("expiration validation", () => {
       it("rejects expired authorization", async () => {
         const payload = createValidPayload();
-        const auth = (payload.payload as Record<string, unknown>).authorization as Record<string, unknown>;
+        const auth = (payload.payload as Record<string, unknown>)
+          .authorization as Record<string, unknown>;
         auth.validBefore = String(Math.floor(Date.now() / 1000) - 100); // expired
         const requirements = createValidRequirements();
 
@@ -285,7 +306,8 @@ describe("UptoEvmScheme", () => {
 
       it("rejects authorization expiring within 6 seconds", async () => {
         const payload = createValidPayload();
-        const auth = (payload.payload as Record<string, unknown>).authorization as Record<string, unknown>;
+        const auth = (payload.payload as Record<string, unknown>)
+          .authorization as Record<string, unknown>;
         auth.validBefore = String(Math.floor(Date.now() / 1000) + 3); // 3 seconds from now
         const requirements = createValidRequirements();
 
@@ -328,7 +350,9 @@ describe("UptoEvmScheme", () => {
 
       it("handles signature verification exception", async () => {
         mockSigner = createMockSigner({
-          verifyTypedData: mock(() => Promise.reject(new Error("Verification error"))),
+          verifyTypedData: mock(() =>
+            Promise.reject(new Error("Verification error"))
+          ),
         });
         scheme = new UptoEvmScheme(mockSigner);
 
@@ -383,7 +407,8 @@ describe("UptoEvmScheme", () => {
     describe("cap validation", () => {
       it("rejects when total exceeds cap", async () => {
         const payload = createValidPayload();
-        const auth = (payload.payload as Record<string, unknown>).authorization as Record<string, unknown>;
+        const auth = (payload.payload as Record<string, unknown>)
+          .authorization as Record<string, unknown>;
         auth.value = "100000"; // cap
         const requirements = createValidRequirements();
         requirements.amount = "200000"; // exceeds cap
@@ -410,7 +435,9 @@ describe("UptoEvmScheme", () => {
 
     describe("permit execution", () => {
       it("calls writeContract with permit function", async () => {
-        const writeContractMock = mock(() => Promise.resolve("0xpermittx" as `0x${string}`));
+        const writeContractMock = mock(() =>
+          Promise.resolve("0xpermittx" as `0x${string}`)
+        );
         mockSigner = createMockSigner({
           writeContract: writeContractMock,
         });
@@ -422,7 +449,9 @@ describe("UptoEvmScheme", () => {
         await scheme.settle(payload, requirements);
 
         expect(writeContractMock).toHaveBeenCalled();
-        const firstCall = writeContractMock.mock.calls[0][0] as { functionName: string };
+        const firstCall = writeContractMock.mock.calls[0][0] as {
+          functionName: string;
+        };
         expect(firstCall.functionName).toBe("permit");
       });
     });
@@ -431,7 +460,9 @@ describe("UptoEvmScheme", () => {
       it("checks allowance when permit fails", async () => {
         const readContractMock = mock(() => Promise.resolve(1000000n));
         const writeContractMock = mock()
-          .mockImplementationOnce(() => Promise.reject(new Error("Permit failed")))
+          .mockImplementationOnce(() =>
+            Promise.reject(new Error("Permit failed"))
+          )
           .mockImplementation(() => Promise.resolve("0xtx" as `0x${string}`));
 
         mockSigner = createMockSigner({
@@ -451,7 +482,9 @@ describe("UptoEvmScheme", () => {
 
       it("returns insufficient_allowance when allowance is too low", async () => {
         const readContractMock = mock(() => Promise.resolve(50n)); // low allowance
-        const writeContractMock = mock(() => Promise.reject(new Error("Permit failed")));
+        const writeContractMock = mock(() =>
+          Promise.reject(new Error("Permit failed"))
+        );
 
         mockSigner = createMockSigner({
           readContract: readContractMock,
@@ -469,8 +502,12 @@ describe("UptoEvmScheme", () => {
       });
 
       it("returns permit_failed when allowance check throws", async () => {
-        const writeContractMock = mock(() => Promise.reject(new Error("Permit failed")));
-        const readContractMock = mock(() => Promise.reject(new Error("Read failed")));
+        const writeContractMock = mock(() =>
+          Promise.reject(new Error("Permit failed"))
+        );
+        const readContractMock = mock(() =>
+          Promise.reject(new Error("Read failed"))
+        );
 
         mockSigner = createMockSigner({
           readContract: readContractMock,
@@ -490,7 +527,9 @@ describe("UptoEvmScheme", () => {
 
     describe("transferFrom execution", () => {
       it("executes transferFrom after successful permit", async () => {
-        const writeContractMock = mock(() => Promise.resolve("0xtx" as `0x${string}`));
+        const writeContractMock = mock(() =>
+          Promise.resolve("0xtx" as `0x${string}`)
+        );
         mockSigner = createMockSigner({
           writeContract: writeContractMock,
         });
@@ -503,14 +542,20 @@ describe("UptoEvmScheme", () => {
 
         // Should be called twice: permit and transferFrom
         expect(writeContractMock.mock.calls.length).toBeGreaterThanOrEqual(2);
-        const secondCall = writeContractMock.mock.calls[1][0] as { functionName: string };
+        const secondCall = writeContractMock.mock.calls[1][0] as {
+          functionName: string;
+        };
         expect(secondCall.functionName).toBe("transferFrom");
       });
 
       it("returns transaction hash on success", async () => {
         mockSigner = createMockSigner({
-          writeContract: mock(() => Promise.resolve("0xsuccesstx" as `0x${string}`)),
-          waitForTransactionReceipt: mock(() => Promise.resolve({ status: "success" })),
+          writeContract: mock(() =>
+            Promise.resolve("0xsuccesstx" as `0x${string}`)
+          ),
+          waitForTransactionReceipt: mock(() =>
+            Promise.resolve({ status: "success" })
+          ),
         });
         scheme = new UptoEvmScheme(mockSigner);
 
@@ -525,7 +570,9 @@ describe("UptoEvmScheme", () => {
 
       it("returns invalid_transaction_state when receipt status is not success", async () => {
         mockSigner = createMockSigner({
-          waitForTransactionReceipt: mock(() => Promise.resolve({ status: "reverted" })),
+          waitForTransactionReceipt: mock(() =>
+            Promise.resolve({ status: "reverted" })
+          ),
         });
         scheme = new UptoEvmScheme(mockSigner);
 
@@ -540,8 +587,12 @@ describe("UptoEvmScheme", () => {
 
       it("returns transaction_failed when transferFrom throws", async () => {
         const writeContractMock = mock()
-          .mockImplementationOnce(() => Promise.resolve("0xpermittx" as `0x${string}`))
-          .mockImplementationOnce(() => Promise.reject(new Error("Transfer failed")));
+          .mockImplementationOnce(() =>
+            Promise.resolve("0xpermittx" as `0x${string}`)
+          )
+          .mockImplementationOnce(() =>
+            Promise.reject(new Error("Transfer failed"))
+          );
 
         mockSigner = createMockSigner({
           writeContract: writeContractMock,

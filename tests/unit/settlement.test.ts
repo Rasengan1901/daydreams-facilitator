@@ -6,10 +6,12 @@ import {
 import {
   InMemoryUptoSessionStore,
   type UptoSession,
-} from "../../src/upto/sessionStore.js";
+} from "../../src/upto/store.js";
 import type { SettleResponse } from "@x402/core/types";
 
-const createMockSession = (overrides: Partial<UptoSession> = {}): UptoSession => ({
+const createMockSession = (
+  overrides: Partial<UptoSession> = {}
+): UptoSession => ({
   cap: 1000n,
   deadline: BigInt(Math.floor(Date.now() / 1000) + 3600),
   pendingSpent: 100n,
@@ -40,7 +42,9 @@ const createSuccessResponse = (): SettleResponse => ({
   payer: "0xpayer",
 });
 
-const createFailureResponse = (reason = "settlement_failed"): SettleResponse => ({
+const createFailureResponse = (
+  reason = "settlement_failed"
+): SettleResponse => ({
   success: false,
   errorReason: reason,
   transaction: "",
@@ -210,7 +214,14 @@ describe("settleUptoSession", () => {
       });
       store.set("session-1", session);
 
-      await settleUptoSession(store, mockClient, "session-1", "test", false, 60);
+      await settleUptoSession(
+        store,
+        mockClient,
+        "session-1",
+        "test",
+        false,
+        60
+      );
 
       expect(store.get("session-1")?.status).toBe("closed");
     });
@@ -223,7 +234,14 @@ describe("settleUptoSession", () => {
       });
       store.set("session-1", session);
 
-      await settleUptoSession(store, mockClient, "session-1", "test", false, 60);
+      await settleUptoSession(
+        store,
+        mockClient,
+        "session-1",
+        "test",
+        false,
+        60
+      );
 
       expect(store.get("session-1")?.status).toBe("open");
     });
@@ -297,7 +315,9 @@ describe("settleUptoSession", () => {
 
       const updated = store.get("session-1");
       expect(updated?.lastSettlement?.receipt.success).toBe(false);
-      expect(updated?.lastSettlement?.receipt.errorReason).toBe("Network error");
+      expect(updated?.lastSettlement?.receipt.errorReason).toBe(
+        "Network error"
+      );
     });
 
     it("handles non-Error thrown values", async () => {
@@ -310,7 +330,9 @@ describe("settleUptoSession", () => {
       await settleUptoSession(store, mockClient, "session-1", "test");
 
       const updated = store.get("session-1");
-      expect(updated?.lastSettlement?.receipt.errorReason).toBe("settlement_failed");
+      expect(updated?.lastSettlement?.receipt.errorReason).toBe(
+        "settlement_failed"
+      );
     });
   });
 

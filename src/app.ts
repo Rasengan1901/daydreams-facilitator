@@ -12,7 +12,7 @@ import type {
 
 import { logger } from "@bogeychan/elysia-logger";
 
-import { facilitator } from "./facilitatorCore.js";
+import { facilitator } from "./setup.js";
 import { uptoSweeper } from "./upto/index.js";
 
 // Elysia app (Node adapter for Node.js runtime)

@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import {
   InMemoryUptoSessionStore,
   type UptoSession,
-} from "../../src/upto/sessionStore.js";
+} from "../../src/upto/store.js";
 
-const createMockSession = (overrides: Partial<UptoSession> = {}): UptoSession => ({
+const createMockSession = (
+  overrides: Partial<UptoSession> = {}
+): UptoSession => ({
   cap: 1000n,
   deadline: BigInt(Math.floor(Date.now() / 1000) + 3600),
   pendingSpent: 0n,

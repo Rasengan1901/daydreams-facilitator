@@ -2,14 +2,16 @@ import { describe, it, expect, beforeEach, mock, spyOn } from "bun:test";
 import {
   InMemoryUptoSessionStore,
   type UptoSession,
-} from "../../src/upto/sessionStore.js";
+} from "../../src/upto/store.js";
 import type { UptoFacilitatorClient } from "../../src/upto/settlement.js";
 import type { SettleResponse } from "@x402/core/types";
 
 // We need to test the sweep logic directly, so we'll extract and test the conditions
 // The createUptoSweeper returns an Elysia plugin, so we test the underlying logic
 
-const createMockSession = (overrides: Partial<UptoSession> = {}): UptoSession => ({
+const createMockSession = (
+  overrides: Partial<UptoSession> = {}
+): UptoSession => ({
   cap: 1000n,
   deadline: BigInt(Math.floor(Date.now() / 1000) + 3600),
   pendingSpent: 100n,
@@ -214,19 +216,39 @@ describe("Sweeper Logic", () => {
 
   describe("sweep logic conditions", () => {
     it("requires open status for settlement triggers", () => {
-      const openSession = createMockSession({ status: "open", pendingSpent: 100n });
-      const closedSession = createMockSession({ status: "closed", pendingSpent: 100n });
+      const openSession = createMockSession({
+        status: "open",
+        pendingSpent: 100n,
+      });
+      const closedSession = createMockSession({
+        status: "closed",
+        pendingSpent: 100n,
+      });
 
-      expect(openSession.status === "open" && openSession.pendingSpent > 0n).toBe(true);
-      expect(closedSession.status === "open" && closedSession.pendingSpent > 0n).toBe(false);
+      expect(
+        openSession.status === "open" && openSession.pendingSpent > 0n
+      ).toBe(true);
+      expect(
+        closedSession.status === "open" && closedSession.pendingSpent > 0n
+      ).toBe(false);
     });
 
     it("requires pendingSpent > 0 for settlement triggers", () => {
-      const withPending = createMockSession({ status: "open", pendingSpent: 100n });
-      const withoutPending = createMockSession({ status: "open", pendingSpent: 0n });
+      const withPending = createMockSession({
+        status: "open",
+        pendingSpent: 100n,
+      });
+      const withoutPending = createMockSession({
+        status: "open",
+        pendingSpent: 0n,
+      });
 
-      expect(withPending.status === "open" && withPending.pendingSpent > 0n).toBe(true);
-      expect(withoutPending.status === "open" && withoutPending.pendingSpent > 0n).toBe(false);
+      expect(
+        withPending.status === "open" && withPending.pendingSpent > 0n
+      ).toBe(true);
+      expect(
+        withoutPending.status === "open" && withoutPending.pendingSpent > 0n
+      ).toBe(false);
     });
   });
 
