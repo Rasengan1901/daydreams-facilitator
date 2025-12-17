@@ -103,16 +103,60 @@ Client → POST /verify → Permit validation → Session created/updated
 
 ### Prerequisites
 
-- Node.js v20+
-- [Bun](https://bun.sh) runtime
+- Node.js v18+
 - EVM private key with Base ETH for gas (or CDP account)
 - SVM private key with SOL for fees (optional)
 
 ### Installation
 
 ```bash
+npm install @x402/facilitator
+# or
+bun add @x402/facilitator
+```
+
+### As a Library
+
+```typescript
+import { createFacilitator, toFacilitatorEvmSigner } from "@x402/facilitator";
+import { createCdpEvmSigner } from "@x402/facilitator/signers/cdp";
+import { CdpClient } from "@coinbase/cdp-sdk";
+
+// Using CDP signer (recommended)
+const cdp = new CdpClient();
+const account = await cdp.evm.getOrCreateAccount({ name: "facilitator" });
+
+const signer = createCdpEvmSigner({
+  cdpClient: cdp,
+  account,
+  network: "base",
+  rpcUrl: process.env.EVM_RPC_URL_BASE,
+});
+
+const facilitator = createFacilitator({
+  evmSigners: [{ signer, networks: "eip155:8453", schemes: ["exact", "upto"] }],
+});
+```
+
+### As a CLI Server
+
+```bash
+# Set environment variables
+export CDP_API_KEY_ID="..."
+export CDP_API_KEY_SECRET="..."
+export CDP_WALLET_SECRET="..."
+
+# Run the server
+npx x402-facilitator
+```
+
+The server starts at `http://localhost:8090`.
+
+### From Source
+
+```bash
 # Clone and install
-git clone <repository-url>
+git clone https://github.com/daydreamsai/facilitator
 cd facilitator
 bun install
 
@@ -123,8 +167,6 @@ cp .env-local .env
 # Start development server
 bun dev
 ```
-
-The server starts at `http://localhost:8090`.
 
 ### Verify Installation
 
@@ -171,8 +213,28 @@ The facilitator supports pluggable signers via the `createFacilitator()` factory
 ### Using the Factory
 
 ```typescript
-import { createFacilitator } from "./setup.js";
-import { evmSigner, svmSigner } from "./signers/index.js";
+import { createFacilitator, toFacilitatorEvmSigner } from "@x402/facilitator";
+import { createWalletClient, http, publicActions } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { base } from "viem/chains";
+
+// Create a viem signer
+const account = privateKeyToAccount(process.env.EVM_PRIVATE_KEY as `0x${string}`);
+const viemClient = createWalletClient({
+  account,
+  chain: base,
+  transport: http(process.env.EVM_RPC_URL_BASE),
+}).extend(publicActions);
+
+const evmSigner = toFacilitatorEvmSigner({
+  address: account.address,
+  getCode: (args) => viemClient.getCode(args),
+  readContract: (args) => viemClient.readContract(args as any),
+  writeContract: (args) => viemClient.writeContract(args as any),
+  verifyTypedData: (args) => viemClient.verifyTypedData(args as any),
+  sendTransaction: (args) => viemClient.sendTransaction(args),
+  waitForTransactionReceipt: (args) => viemClient.waitForTransactionReceipt(args),
+});
 
 const facilitator = createFacilitator({
   evmSigners: [
@@ -180,12 +242,6 @@ const facilitator = createFacilitator({
       signer: evmSigner,
       networks: ["eip155:8453", "eip155:84532"],
       schemes: ["exact", "upto"],
-    },
-  ],
-  svmSigners: [
-    {
-      signer: svmSigner,
-      networks: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
     },
   ],
   hooks: {
@@ -199,12 +255,13 @@ const facilitator = createFacilitator({
 Use [Coinbase Developer Platform](https://portal.cdp.coinbase.com/) for managed key custody:
 
 ```bash
-bun add @coinbase/cdp-sdk
+npm install @coinbase/cdp-sdk
 ```
 
 ```typescript
+import { createFacilitator } from "@x402/facilitator";
+import { createCdpEvmSigner } from "@x402/facilitator/signers/cdp";
 import { CdpClient } from "@coinbase/cdp-sdk";
-import { createCdpEvmSigner, createFacilitator } from "./setup.js";
 
 // Initialize CDP (uses env vars by default)
 const cdp = new CdpClient();
@@ -229,7 +286,8 @@ const facilitator = createFacilitator({
 ### Multi-Network CDP Setup
 
 ```typescript
-import { createMultiNetworkCdpSigners, createFacilitator } from "./setup.js";
+import { createFacilitator } from "@x402/facilitator";
+import { createMultiNetworkCdpSigners } from "@x402/facilitator/signers/cdp";
 
 const signers = createMultiNetworkCdpSigners({
   cdpClient: cdp,
@@ -395,7 +453,7 @@ Permit-based flow for efficient EVM token payments:
 ### Adding Networks
 
 ```typescript
-import { createFacilitator } from "./setup.js";
+import { createFacilitator } from "@x402/facilitator";
 
 const facilitator = createFacilitator({
   evmSigners: [
@@ -440,13 +498,13 @@ const facilitator = createFacilitator({
 Replace in-memory storage with persistent storage:
 
 ```typescript
-import { UptoSessionStore } from "./upto/store.js";
+import type { UptoSessionStore, UptoSession } from "@x402/facilitator/upto";
 
 class RedisSessionStore implements UptoSessionStore {
-  async get(id: string) { /* Redis get */ }
-  async set(id: string, session: UptoSession) { /* Redis set */ }
-  async delete(id: string) { /* Redis del */ }
-  async entries() { /* Redis scan */ }
+  get(id: string): UptoSession | undefined { /* Redis get */ }
+  set(id: string, session: UptoSession): void { /* Redis set */ }
+  delete(id: string): void { /* Redis del */ }
+  entries(): IterableIterator<[string, UptoSession]> { /* Redis scan */ }
 }
 ```
 
@@ -455,7 +513,7 @@ class RedisSessionStore implements UptoSessionStore {
 Create adapters for other wallet providers:
 
 ```typescript
-import { toFacilitatorEvmSigner } from "@x402/evm";
+import { toFacilitatorEvmSigner } from "@x402/facilitator";
 
 const customSigner = toFacilitatorEvmSigner({
   address: wallet.address,

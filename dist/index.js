@@ -11,9 +11,8 @@
  * - EVM_PRIVATE_KEY, SVM_PRIVATE_KEY: For private key signer (fallback)
  * - EVM_RPC_URL_BASE, EVM_RPC_URL_BASE_SEPOLIA: RPC URLs
  */
-
 import { app } from "./app.js";
 import { PORT } from "./config.js";
-
 app.listen(PORT);
 console.log(`x402 Facilitator listening on http://localhost:${PORT}`);
+//# sourceMappingURL=index.js.map
