@@ -13,7 +13,8 @@ A production-ready payment settlement service for the [x402 protocol](https://gi
 - [Custom Signers](#custom-signers)
 - [API Reference](#api-reference)
 - [Payment Schemes](#payment-schemes)
-- [Extending the Facilitator](#extending-the-facilitator)
+- [Upto Module](#upto-module)
+- [Resource Server](#resource-server)
 - [Testing](#testing)
 - [Production Deployment](#production-deployment)
 
@@ -77,8 +78,7 @@ The x402 Facilitator acts as a trusted intermediary between clients making payme
 | Component           | File                          | Responsibility                              |
 | ------------------- | ----------------------------- | ------------------------------------------- |
 | HTTP Server         | `src/app.ts`                  | Elysia server with endpoints and middleware |
-| Facilitator Factory | `src/setup.ts`                | `createFacilitator()` with signer injection |
-| Default Signers     | `src/signers/default.ts`      | EVM/SVM wallet from env vars                |
+| Facilitator Factory | `src/factory.ts`              | `createFacilitator()` with signer injection |
 | CDP Signer          | `src/signers/cdp.ts`          | Coinbase Developer Platform adapter         |
 | Upto Scheme         | `src/upto/evm/facilitator.ts` | Permit-based batched payments               |
 | Session Store       | `src/upto/store.ts`           | In-memory session management                |
@@ -107,24 +107,21 @@ Client → POST /verify → Permit validation → Session created/updated
 
 ### Prerequisites
 
-- Node.js v22+
-- EVM private key with Base ETH for gas (or CDP account)
-- SVM private key with SOL for fees (optional)
+- Node.js v22+ or Bun
+- CDP account (recommended) or EVM/SVM private keys
 
 ### As a Library
 
 ```typescript
-import {
-  createFacilitator,
-  toFacilitatorEvmSigner,
-} from "@daydreamsai/facilitator";
+import { createFacilitator } from "@daydreamsai/facilitator";
 import { createCdpEvmSigner } from "@daydreamsai/facilitator/signers/cdp";
 import { CdpClient } from "@coinbase/cdp-sdk";
 
-// Using CDP signer (recommended)
+// Initialize CDP
 const cdp = new CdpClient();
 const account = await cdp.evm.getOrCreateAccount({ name: "facilitator" });
 
+// Create signer
 const signer = createCdpEvmSigner({
   cdpClient: cdp,
   account,
@@ -132,6 +129,7 @@ const signer = createCdpEvmSigner({
   rpcUrl: process.env.EVM_RPC_URL_BASE,
 });
 
+// Create facilitator
 const facilitator = createFacilitator({
   evmSigners: [{ signer, networks: "eip155:8453", schemes: ["exact", "upto"] }],
 });
@@ -147,7 +145,7 @@ bun install
 
 # Configure environment
 cp .env-local .env
-# Edit .env with your private keys
+# Edit .env with your CDP credentials or private keys
 
 # Start development server
 bun dev
@@ -163,24 +161,30 @@ curl http://localhost:8090/supported
 
 ### Environment Variables
 
-**Default Signer (Private Key)**
-
-| Variable           | Required | Default | Description                        |
-| ------------------ | -------- | ------- | ---------------------------------- |
-| `EVM_PRIVATE_KEY`  | Yes\*    | -       | Ethereum private key (hex format)  |
-| `SVM_PRIVATE_KEY`  | Yes\*    | -       | Solana private key (Base58 format) |
-| `PORT`             | No       | `8090`  | Server port                        |
-| `EVM_RPC_URL_BASE` | No       | -       | Custom RPC URL for Base            |
-
-\*Required when using default signers. Not needed with CDP signer.
-
-**CDP Signer (Coinbase Developer Platform)**
+**CDP Signer (Recommended)**
 
 | Variable             | Required | Default | Description        |
 | -------------------- | -------- | ------- | ------------------ |
 | `CDP_API_KEY_ID`     | Yes      | -       | CDP API key ID     |
 | `CDP_API_KEY_SECRET` | Yes      | -       | CDP API key secret |
 | `CDP_WALLET_SECRET`  | Yes      | -       | CDP wallet secret  |
+| `CDP_ACCOUNT_NAME`   | No       | -       | CDP account name   |
+
+**Private Key Signer (Fallback)**
+
+| Variable           | Required | Default | Description                        |
+| ------------------ | -------- | ------- | ---------------------------------- |
+| `EVM_PRIVATE_KEY`  | Yes\*    | -       | Ethereum private key (hex format)  |
+| `SVM_PRIVATE_KEY`  | Yes\*    | -       | Solana private key (Base58 format) |
+
+\*Required when CDP credentials are not configured.
+
+**Server Configuration**
+
+| Variable           | Required | Default | Description             |
+| ------------------ | -------- | ------- | ----------------------- |
+| `PORT`             | No       | `8090`  | Server port             |
+| `EVM_RPC_URL_BASE` | No       | -       | Custom RPC URL for Base |
 
 ### OpenTelemetry (Optional)
 
@@ -193,83 +197,28 @@ export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
 
 ## Custom Signers
 
-The facilitator supports pluggable signers via the `createFacilitator()` factory.
-
-### Using the Factory
-
-```typescript
-import {
-  createFacilitator,
-  toFacilitatorEvmSigner,
-} from "@daydreamsai/facilitator";
-import { createWalletClient, http, publicActions } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
-import { base } from "viem/chains";
-
-// Create a viem signer
-const account = privateKeyToAccount(
-  process.env.EVM_PRIVATE_KEY as `0x${string}`
-);
-const viemClient = createWalletClient({
-  account,
-  chain: base,
-  transport: http(process.env.EVM_RPC_URL_BASE),
-}).extend(publicActions);
-
-const evmSigner = toFacilitatorEvmSigner({
-  address: account.address,
-  getCode: (args) => viemClient.getCode(args),
-  readContract: (args) => viemClient.readContract(args as any),
-  writeContract: (args) => viemClient.writeContract(args as any),
-  verifyTypedData: (args) => viemClient.verifyTypedData(args as any),
-  sendTransaction: (args) => viemClient.sendTransaction(args),
-  waitForTransactionReceipt: (args) =>
-    viemClient.waitForTransactionReceipt(args),
-});
-
-const facilitator = createFacilitator({
-  evmSigners: [
-    {
-      signer: evmSigner,
-      networks: ["eip155:8453", "eip155:84532"],
-      schemes: ["exact", "upto"],
-    },
-  ],
-  hooks: {
-    onAfterSettle: async (ctx) => console.log("Settled:", ctx),
-  },
-});
-```
-
-### CDP Signer (Coinbase Developer Platform)
+### CDP Signer (Recommended)
 
 Use [Coinbase Developer Platform](https://portal.cdp.coinbase.com/) for managed key custody:
-
-```bash
-npm install @coinbase/cdp-sdk
-```
 
 ```typescript
 import { createFacilitator } from "@daydreamsai/facilitator";
 import { createCdpEvmSigner } from "@daydreamsai/facilitator/signers/cdp";
 import { CdpClient } from "@coinbase/cdp-sdk";
 
-// Initialize CDP (uses env vars by default)
 const cdp = new CdpClient();
 const account = await cdp.evm.getOrCreateAccount({ name: "facilitator" });
 
-// Create signer for Base
-const cdpSigner = createCdpEvmSigner({
+const signer = createCdpEvmSigner({
   cdpClient: cdp,
   account,
   network: "base",
   rpcUrl: process.env.EVM_RPC_URL_BASE,
 });
 
-// Create facilitator
 const facilitator = createFacilitator({
   evmSigners: [
-    { signer: cdpSigner, networks: "eip155:8453", schemes: ["exact", "upto"] },
+    { signer, networks: "eip155:8453", schemes: ["exact", "upto"] },
   ],
 });
 ```
@@ -312,6 +261,36 @@ const facilitator = createFacilitator({
 | `polygon`          | `eip155:137`      | 137      |
 | `avalanche`        | `eip155:43114`    | 43114    |
 
+### Lifecycle Hooks
+
+Add custom logic at key points:
+
+```typescript
+const facilitator = createFacilitator({
+  evmSigners: [{ signer, networks: "eip155:8453" }],
+  hooks: {
+    onBeforeVerify: async (ctx) => {
+      // Rate limiting, logging
+    },
+    onAfterVerify: async (ctx) => {
+      // Track verified payments
+    },
+    onVerifyFailure: async (ctx) => {
+      // Handle verification failures
+    },
+    onBeforeSettle: async (ctx) => {
+      // Validate before settlement
+    },
+    onAfterSettle: async (ctx) => {
+      // Analytics, notifications
+    },
+    onSettleFailure: async (ctx) => {
+      // Alerting, retry logic
+    },
+  },
+});
+```
+
 ## API Reference
 
 ### GET /supported
@@ -324,16 +303,10 @@ Returns supported payment schemes and networks.
 {
   "kinds": [
     { "x402Version": 2, "scheme": "exact", "network": "eip155:8453" },
-    { "x402Version": 2, "scheme": "upto", "network": "eip155:8453" },
-    {
-      "x402Version": 2,
-      "scheme": "exact",
-      "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"
-    }
+    { "x402Version": 2, "scheme": "upto", "network": "eip155:8453" }
   ],
   "signers": {
-    "eip155": ["0x..."],
-    "solana": ["..."]
+    "eip155": ["0x..."]
   }
 }
 ```
@@ -348,7 +321,6 @@ Validates a payment signature against requirements.
 {
   "paymentPayload": {
     "x402Version": 2,
-    "resource": { "url": "...", "description": "...", "mimeType": "..." },
     "accepted": {
       "scheme": "exact",
       "network": "eip155:8453",
@@ -448,53 +420,62 @@ Permit-based flow for efficient EVM token payments:
 
 **Limitations:**
 
-- ERC-2612 Permit tokens only (not EIP-3009)
-- EOA signatures only (no smart wallets/EIP-1271)
-- In-memory sessions (lost on restart)
+- ERC-2612 Permit tokens only
+- In-memory sessions (lost on restart without custom store)
 
-## Extending the Facilitator
+## Upto Module
 
-### Adding Networks
+The upto module provides components for batched payment tracking on resource servers.
+
+### Installation
 
 ```typescript
-import { createFacilitator } from "@daydreamsai/facilitator";
-
-const facilitator = createFacilitator({
-  evmSigners: [
-    {
-      signer: evmSigner,
-      networks: ["eip155:8453", "eip155:10", "eip155:42161"], // Base + Optimism + Arbitrum
-      schemes: ["exact", "upto"],
-    },
-  ],
-});
+import {
+  createUptoModule,
+  trackUptoPayment,
+  generateSessionId,
+  formatSession,
+  TRACKING_ERROR_MESSAGES,
+  TRACKING_ERROR_STATUS,
+} from "@daydreamsai/facilitator/upto";
 ```
 
-### Lifecycle Hooks
-
-Add custom logic at key points:
+### Creating an Upto Module
 
 ```typescript
-const facilitator = createFacilitator({
-  evmSigners: [{ signer, networks: "eip155:8453" }],
-  hooks: {
-    onBeforeVerify: async (ctx) => {
-      // Rate limiting, logging
-    },
-    onAfterVerify: async (ctx) => {
-      // Track verified payments
-    },
-    onBeforeSettle: async (ctx) => {
-      // Validate before settlement
-    },
-    onAfterSettle: async (ctx) => {
-      // Analytics, notifications
-    },
-    onSettleFailure: async (ctx) => {
-      // Alerting, retry logic
-    },
-  },
+import { createUptoModule } from "@daydreamsai/facilitator/upto";
+import { HTTPFacilitatorClient } from "@x402/core/http";
+
+const facilitatorClient = new HTTPFacilitatorClient({
+  url: "http://localhost:8090",
 });
+
+const upto = createUptoModule({
+  facilitatorClient,
+  // Optional: custom session store (defaults to InMemoryUptoSessionStore)
+  // store: new RedisSessionStore(),
+});
+
+// Use the sweeper plugin for automatic settlement
+app.use(upto.sweeper);
+```
+
+### Tracking Payments
+
+```typescript
+import { trackUptoPayment, TRACKING_ERROR_STATUS } from "@daydreamsai/facilitator/upto";
+
+const result = trackUptoPayment(upto.store, paymentPayload, requirements);
+
+if (!result.success) {
+  // Handle error
+  const status = TRACKING_ERROR_STATUS[result.error];
+  return { error: result.error, status };
+}
+
+// Payment tracked successfully
+console.log(`Session ${result.sessionId} updated`);
+console.log(`Pending: ${result.session.pendingSpent}`);
 ```
 
 ### Custom Session Store
@@ -502,10 +483,7 @@ const facilitator = createFacilitator({
 Replace in-memory storage with persistent storage:
 
 ```typescript
-import type {
-  UptoSessionStore,
-  UptoSession,
-} from "@daydreamsai/facilitator/upto";
+import type { UptoSessionStore, UptoSession } from "@daydreamsai/facilitator/upto";
 
 class RedisSessionStore implements UptoSessionStore {
   get(id: string): UptoSession | undefined {
@@ -523,22 +501,26 @@ class RedisSessionStore implements UptoSessionStore {
 }
 ```
 
-### Custom Signer Adapter
+## Resource Server
 
-Create adapters for other wallet providers:
+Pre-configured resource server with all schemes registered:
 
 ```typescript
-import { toFacilitatorEvmSigner } from "@daydreamsai/facilitator";
+import { createResourceServer } from "@daydreamsai/facilitator/server";
+import { HTTPFacilitatorClient } from "@x402/core/http";
 
-const customSigner = toFacilitatorEvmSigner({
-  address: wallet.address,
-  getCode: (args) => publicClient.getCode(args),
-  readContract: (args) => publicClient.readContract(args),
-  writeContract: (args) => wallet.writeContract(args),
-  verifyTypedData: (args) => publicClient.verifyTypedData(args),
-  sendTransaction: (args) => wallet.sendTransaction(args),
-  waitForTransactionReceipt: (args) =>
-    publicClient.waitForTransactionReceipt(args),
+const facilitatorClient = new HTTPFacilitatorClient({
+  url: "http://localhost:8090",
+});
+
+const resourceServer = createResourceServer(facilitatorClient);
+await resourceServer.initialize();
+
+// Use with payment middleware
+resourceServer.onAfterVerify(async (ctx) => {
+  if (ctx.requirements.scheme === "upto") {
+    // Track upto sessions
+  }
 });
 ```
 
@@ -583,7 +565,6 @@ bun test:coverage
    - Use CDP for managed custody (recommended)
    - Or use secrets managers (AWS Secrets Manager, HashiCorp Vault)
    - Never commit `.env` files with real keys
-   - Rotate keys periodically
 
 2. **Network Security**
    - Run behind a reverse proxy (nginx, Cloudflare)
@@ -604,12 +585,10 @@ bun test:coverage
 2. **RPC Resilience**
    - Configure multiple RPC endpoints
    - Implement retry logic with exponential backoff
-   - Consider RPC providers with built-in failover
 
 3. **Monitoring**
    - Enable OpenTelemetry tracing
    - Set up alerts for settlement failures
-   - Monitor transaction costs and gas prices
 
 ### Example Deployment
 
@@ -619,15 +598,10 @@ services:
   facilitator:
     build: .
     environment:
-      # Option 1: CDP (recommended)
       - CDP_API_KEY_ID=${CDP_API_KEY_ID}
       - CDP_API_KEY_SECRET=${CDP_API_KEY_SECRET}
       - CDP_WALLET_SECRET=${CDP_WALLET_SECRET}
-      # Option 2: Raw private keys
-      # - EVM_PRIVATE_KEY=${EVM_PRIVATE_KEY}
-      # - SVM_PRIVATE_KEY=${SVM_PRIVATE_KEY}
       - PORT=8090
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
     ports:
       - "8090:8090"
     healthcheck:

@@ -7,15 +7,29 @@
  * @example
  * ```typescript
  * import {
- *   InMemoryUptoSessionStore,
- *   createUptoSweeper,
- *   settleUptoSession,
+ *   createUptoModule,
+ *   trackUptoPayment,
+ *   generateSessionId,
  * } from "@daydreamsai/facilitator/upto";
  *
- * const store = new InMemoryUptoSessionStore();
- * const sweeper = createUptoSweeper({ store, facilitatorClient });
+ * // Create module with default in-memory store
+ * const upto = createUptoModule({ facilitatorClient });
+ * app.use(upto.sweeper);
+ *
+ * // Track payments
+ * const result = trackUptoPayment(upto.store, paymentPayload, requirements);
+ * if (result.success) {
+ *   console.log(`Tracked payment in session ${result.sessionId}`);
+ * }
  * ```
  */
+
+// Module factory (preferred API)
+export {
+  createUptoModule,
+  type UptoModule,
+  type UptoModuleConfig,
+} from "./module.js";
 
 // Session store
 export {
@@ -24,6 +38,23 @@ export {
   type UptoSession,
   type UptoSessionStatus,
 } from "./store.js";
+
+// Session ID generation
+export {
+  generateSessionId,
+  extractUptoAuthorization,
+  type UptoAuthorization,
+} from "./sessionId.js";
+
+// Session tracking helpers
+export {
+  trackUptoPayment,
+  formatSession,
+  TRACKING_ERROR_MESSAGES,
+  TRACKING_ERROR_STATUS,
+  type TrackingResult,
+  type TrackingError,
+} from "./tracking.js";
 
 // Settlement
 export { settleUptoSession, type UptoFacilitatorClient } from "./settlement.js";
