@@ -233,15 +233,31 @@ describe("UptoEvmScheme", () => {
     });
 
     describe("recipient validation", () => {
-      it("rejects recipient mismatch", async () => {
+      it("allows different payTo from authorization.to (facilitator transfers to merchant)", async () => {
+        // In upto scheme: authorization.to = facilitator (spender), payTo = merchant (recipient)
+        // These are meant to be different - facilitator gets allowance, then transfers to payTo
         const payload = createValidPayload();
         const requirements = createValidRequirements();
         requirements.payTo = "0x9999999999999999999999999999999999999999";
 
         const result = await scheme.verify(payload, requirements);
 
+        // Valid because authorization.to (facilitator) is still in signer addresses
+        expect(result.isValid).toBe(true);
+      });
+
+      it("rejects when spender (authorization.to) is not the facilitator", async () => {
+        // The permit spender must be the facilitator who will call transferFrom
+        const payload = createValidPayload();
+        const auth = (payload.payload as Record<string, unknown>)
+          .authorization as Record<string, unknown>;
+        auth.to = "0x9999999999999999999999999999999999999999"; // not the facilitator
+        const requirements = createValidRequirements();
+
+        const result = await scheme.verify(payload, requirements);
+
         expect(result.isValid).toBe(false);
-        expect(result.invalidReason).toBe("recipient_mismatch");
+        expect(result.invalidReason).toBe("spender_not_facilitator");
       });
     });
 

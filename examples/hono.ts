@@ -1,19 +1,14 @@
 import { Hono } from "hono";
 import { paymentMiddleware } from "@x402/hono";
-import { createHash } from "node:crypto";
 
-import { evmAccount, svmAccount } from "../src/signers/index.js";
+import { evmAccount } from "../src/signers/index.js";
 import {
   createResourceServer,
   HTTPFacilitatorClient,
-  UptoEvmServerScheme,
-} from "@daydreamsai/facilitator";
-import {
   InMemoryUptoSessionStore,
   settleUptoSession,
-  type UptoSession,
+  trackUptoPayment,
 } from "@daydreamsai/facilitator";
-import type { PaymentPayload, PaymentRequirements } from "@x402/core/types";
 
 const facilitatorUrl = process.env.FACILITATOR_URL ?? "http://localhost:8090";
 const evmAddress = evmAccount.address;
@@ -31,85 +26,19 @@ resourceServer.initialize();
 // Session store for upto scheme batched payments
 const uptoStore = new InMemoryUptoSessionStore();
 
-// Helper to generate session ID from payment payload
-function getUptoSessionId(paymentPayload: PaymentPayload): string {
-  const p = paymentPayload.payload as Record<string, unknown>;
-  const auth = (p?.authorization ?? {}) as Record<string, unknown>;
-  const key = {
-    network: paymentPayload.accepted.network,
-    asset: paymentPayload.accepted.asset,
-    owner: auth.from,
-    spender: auth.to,
-    cap: auth.value,
-    nonce: auth.nonce,
-    deadline: auth.validBefore,
-    signature: p?.signature,
-  };
-  return createHash("sha256").update(JSON.stringify(key)).digest("hex");
-}
-
-// Helper to track upto session from verification result
-function trackUptoSession(
-  paymentPayload: PaymentPayload,
-  requirements: PaymentRequirements
-): { sessionId: string; error?: string } {
-  const sessionId = getUptoSessionId(paymentPayload);
-  const auth = (paymentPayload.payload as Record<string, unknown>)
-    ?.authorization as Record<string, unknown>;
-
-  const cap = BigInt((auth?.value as string) ?? "0");
-  const deadline = BigInt((auth?.validBefore as string) ?? "0");
-  const price = BigInt(requirements.amount ?? "0");
-
-  const existing =
-    uptoStore.get(sessionId) ??
-    ({
-      cap,
-      pendingSpent: 0n,
-      settledTotal: 0n,
-      deadline,
-      lastActivityMs: Date.now(),
-      status: "open",
-      paymentPayload,
-      paymentRequirements: requirements,
-    } as UptoSession);
-
-  // Check session status
-  if (existing.status === "settling") {
-    return { sessionId, error: "settling_in_progress" };
-  }
-  if (existing.status === "closed") {
-    return { sessionId, error: "session_closed" };
-  }
-
-  // Check cap
-  const nextTotal = existing.settledTotal + existing.pendingSpent + price;
-  if (nextTotal > existing.cap) {
-    return { sessionId, error: "cap_exhausted" };
-  }
-
-  // Update session
-  existing.pendingSpent += price;
-  existing.lastActivityMs = Date.now();
-  existing.paymentPayload = paymentPayload;
-  existing.paymentRequirements = requirements;
-  uptoStore.set(sessionId, existing);
-
-  return { sessionId };
-}
-
 // Register hook to track upto sessions after verification
 resourceServer.onAfterVerify(async (ctx) => {
   if (ctx.requirements.scheme !== "upto") return;
   if (!ctx.result.isValid) return;
 
   // Track the session (errors are logged but don't block the request)
-  const { sessionId, error } = trackUptoSession(
+  const result = trackUptoPayment(
+    uptoStore,
     ctx.paymentPayload,
     ctx.requirements
   );
-  if (error) {
-    console.warn(`Upto session ${sessionId} error: ${error}`);
+  if (!result.success) {
+    console.warn(`Upto session ${result.sessionId} error: ${result.error}`);
   }
 });
 

@@ -13,7 +13,6 @@ import type {
 import { logger } from "@bogeychan/elysia-logger";
 
 import { facilitator } from "./setup.js";
-import { uptoSweeper } from "./upto/index.js";
 
 // Elysia app (Node adapter for Node.js runtime)
 export const app = new Elysia({ adapter: node() })
@@ -29,7 +28,6 @@ export const app = new Elysia({ adapter: node() })
       spanProcessors: [new BatchSpanProcessor(new OTLPTraceExporter())],
     })
   )
-  .use(uptoSweeper)
   /**
    * POST /verify
    * Verify a payment against requirements
