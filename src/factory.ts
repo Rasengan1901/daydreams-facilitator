@@ -8,7 +8,7 @@
 import type { FacilitatorEvmSigner } from "@x402/evm";
 import type { FacilitatorSvmSigner } from "@x402/svm";
 import { x402Facilitator } from "@x402/core/facilitator";
-import { registerExactEvmScheme } from "@x402/evm/exact/facilitator";
+import { ExactEvmScheme } from "@x402/evm/exact/facilitator";
 import { registerExactSvmScheme } from "@x402/svm/exact/facilitator";
 
 import { registerUptoEvmScheme } from "./upto/evm/register.js";
@@ -114,11 +114,13 @@ export function createFacilitator(config: FacilitatorConfig): x402Facilitator {
     const schemes = evmConfig.schemes ?? ["exact", "upto"];
 
     if (schemes.includes("exact")) {
-      registerExactEvmScheme(facilitator, {
-        signer: evmConfig.signer,
-        networks: evmConfig.networks,
-        deployERC4337WithEIP6492: evmConfig.deployERC4337WithEIP6492,
-      });
+      // Register v2 only (skip v1 auto-registration from @x402/evm)
+      facilitator.register(
+        evmConfig.networks,
+        new ExactEvmScheme(evmConfig.signer, {
+          deployERC4337WithEIP6492: evmConfig.deployERC4337WithEIP6492,
+        })
+      );
     }
 
     if (schemes.includes("upto")) {

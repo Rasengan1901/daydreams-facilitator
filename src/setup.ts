@@ -20,6 +20,7 @@ import {
   USE_CDP,
   EVM_RPC_URL_BASE,
   EVM_RPC_URL_BASE_SEPOLIA,
+  SVM_PRIVATE_KEY,
 } from "./config.js";
 
 // Re-export types and factory for backwards compatibility
@@ -73,8 +74,17 @@ async function createDefaultSigners(): Promise<{
       deployERC4337WithEIP6492: true,
     });
 
-    // No SVM signer for CDP (not supported yet)
-    return { evmSigners, svmSigners: [] };
+    // CDP doesn't support SVM yet, use private key signer if available
+    const svmSigners: SvmSignerConfig[] = [];
+    if (SVM_PRIVATE_KEY) {
+      const { svmSigner } = await import("./signers/index.js");
+      svmSigners.push({
+        signer: svmSigner,
+        networks: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+      });
+    }
+
+    return { evmSigners, svmSigners };
   } else {
     // Private Key Signer (fallback)
     // Create separate signers for each network to ensure correct RPC/chain configuration
