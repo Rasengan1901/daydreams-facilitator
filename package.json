@@ -19,6 +19,18 @@
       "import": "./dist/elysia/index.js",
       "types": "./dist/elysia/index.d.ts"
     },
+    "./hono": {
+      "import": "./dist/hono/index.js",
+      "types": "./dist/hono/index.d.ts"
+    },
+    "./express": {
+      "import": "./dist/express/index.js",
+      "types": "./dist/express/index.d.ts"
+    },
+    "./middleware": {
+      "import": "./dist/middleware/index.js",
+      "types": "./dist/middleware/index.d.ts"
+    },
     "./signers/cdp": {
       "import": "./dist/signers/lib.js",
       "types": "./dist/signers/lib.d.ts"

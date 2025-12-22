@@ -19,6 +19,11 @@ A production-ready payment settlement service for the [x402 protocol](https://gi
 - [Unified Client](#unified-client)
 - [Upto Module](#upto-module)
 - [Resource Server](#resource-server)
+- [Framework Middleware](#framework-middleware)
+  - [Elysia](#elysia)
+  - [Hono](#hono)
+  - [Express](#express)
+  - [Paywall Support](#paywall-support)
 - [Testing](#testing)
 - [Production Deployment](#production-deployment)
 
@@ -89,6 +94,10 @@ The x402 Facilitator acts as a trusted intermediary between clients making payme
 | Upto Scheme         | `src/upto/evm/facilitator.ts` | Permit-based batched payments               |
 | Session Store       | `src/upto/store.ts`           | In-memory session management                |
 | Sweeper             | `src/upto/sweeper.ts`         | Background batch settlement                 |
+| Elysia Middleware   | `src/elysia/`                 | Payment middleware for Elysia               |
+| Hono Middleware     | `src/hono/`                   | Payment middleware for Hono                 |
+| Express Middleware  | `src/express/`                | Payment middleware for Express              |
+| Middleware Core     | `src/middleware/core.ts`      | Shared payment processing logic             |
 
 ### Data Flow
 
@@ -736,6 +745,231 @@ resourceServer.onAfterVerify(async (ctx) => {
   }
 });
 ```
+
+## Framework Middleware
+
+Pre-built payment middleware for popular web frameworks. Each middleware handles:
+
+- Payment verification via the facilitator
+- Automatic settlement after successful requests
+- Paywall HTML for browser-based payments
+- Upto session tracking (optional)
+
+### Elysia
+
+```typescript
+import { Elysia } from "elysia";
+import { node } from "@elysiajs/node";
+import { HTTPFacilitatorClient } from "@x402/core/http";
+import { createPaywall, evmPaywall, svmPaywall } from "@x402/paywall";
+
+import { createElysiaPaidRoutes } from "@daydreamsai/facilitator/elysia";
+import { createResourceServer } from "@daydreamsai/facilitator/server";
+import { createUptoModule } from "@daydreamsai/facilitator/upto";
+
+const facilitatorClient = new HTTPFacilitatorClient({ url: "http://localhost:8090" });
+const resourceServer = createResourceServer(facilitatorClient);
+const upto = createUptoModule({ facilitatorClient, autoSweeper: true });
+const paywallProvider = createPaywall()
+  .withNetwork(evmPaywall)
+  .withNetwork(svmPaywall)
+  .build();
+
+const app = new Elysia({ prefix: "/api", adapter: node() });
+
+createElysiaPaidRoutes(app, {
+  basePath: "/api",
+  middleware: {
+    resourceServer,
+    upto,
+    paywallProvider,
+    paywallConfig: { appName: "My Paid API", testnet: true },
+  },
+})
+  .get("/premium", () => ({ message: "premium content" }), {
+    payment: {
+      accepts: {
+        scheme: "exact",
+        network: "eip155:8453",
+        payTo: "0x...",
+        price: "$0.01",
+      },
+      description: "Premium content",
+      mimeType: "application/json",
+    },
+  });
+
+app.listen(4022);
+```
+
+### Hono
+
+```typescript
+import { Hono } from "hono";
+import { HTTPFacilitatorClient } from "@x402/core/http";
+import { createPaywall, evmPaywall, svmPaywall } from "@x402/paywall";
+
+import { createHonoPaidRoutes } from "@daydreamsai/facilitator/hono";
+import { createResourceServer } from "@daydreamsai/facilitator/server";
+import { createUptoModule } from "@daydreamsai/facilitator/upto";
+
+const facilitatorClient = new HTTPFacilitatorClient({ url: "http://localhost:8090" });
+const resourceServer = createResourceServer(facilitatorClient);
+const upto = createUptoModule({ facilitatorClient, autoSweeper: true });
+const paywallProvider = createPaywall()
+  .withNetwork(evmPaywall)
+  .withNetwork(svmPaywall)
+  .build();
+
+const app = new Hono().basePath("/api");
+
+createHonoPaidRoutes(app, {
+  basePath: "/api",
+  middleware: {
+    resourceServer,
+    upto,
+    paywallProvider,
+    paywallConfig: { appName: "My Paid API", testnet: true },
+  },
+})
+  .get("/premium", (c) => c.json({ message: "premium content" }), {
+    payment: {
+      accepts: {
+        scheme: "exact",
+        network: "eip155:8453",
+        payTo: "0x...",
+        price: "$0.01",
+      },
+      description: "Premium content",
+      mimeType: "application/json",
+    },
+  });
+
+export default { port: 4023, fetch: app.fetch };
+```
+
+### Express
+
+```typescript
+import express from "express";
+import { HTTPFacilitatorClient } from "@x402/core/http";
+import { createPaywall, evmPaywall, svmPaywall } from "@x402/paywall";
+
+import { createExpressPaidRoutes } from "@daydreamsai/facilitator/express";
+import { createResourceServer } from "@daydreamsai/facilitator/server";
+import { createUptoModule } from "@daydreamsai/facilitator/upto";
+
+const facilitatorClient = new HTTPFacilitatorClient({ url: "http://localhost:8090" });
+const resourceServer = createResourceServer(facilitatorClient);
+const upto = createUptoModule({ facilitatorClient, autoSweeper: true });
+const paywallProvider = createPaywall()
+  .withNetwork(evmPaywall)
+  .withNetwork(svmPaywall)
+  .build();
+
+const app = express();
+app.use(express.json());
+
+createExpressPaidRoutes(app, {
+  basePath: "/api",
+  middleware: {
+    resourceServer,
+    upto,
+    paywallProvider,
+    paywallConfig: { appName: "My Paid API", testnet: true },
+  },
+})
+  .get("/api/premium", (_req, res) => res.json({ message: "premium content" }), {
+    payment: {
+      accepts: {
+        scheme: "exact",
+        network: "eip155:8453",
+        payTo: "0x...",
+        price: "$0.01",
+      },
+      description: "Premium content",
+      mimeType: "application/json",
+    },
+  });
+
+app.listen(4024);
+```
+
+### Middleware Configuration
+
+| Option | Type | Description |
+| ------ | ---- | ----------- |
+| `resourceServer` | `x402ResourceServer` | Pre-configured resource server instance |
+| `upto` | `UptoModule` | Optional upto module for batched payments |
+| `paywallProvider` | `PaywallProvider` | Optional paywall HTML generator |
+| `paywallConfig` | `PaywallConfig` | Paywall display options |
+| `autoSettle` | `boolean` | Auto-settle after successful requests (default: `true`) |
+| `paymentHeaderAliases` | `string[]` | Alternative header names for payment data |
+
+### Payment Route Options
+
+Each route can specify payment requirements:
+
+```typescript
+{
+  payment: {
+    accepts: {
+      scheme: "exact" | "upto",
+      network: "eip155:8453",           // CAIP-2 network ID
+      payTo: "0x...",                   // Recipient address
+      price: "$0.01" | {                // Price shorthand or detailed
+        amount: "10000",
+        asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        extra: { name: "USD Coin", version: "2" }
+      }
+    },
+    description: "What this endpoint provides",
+    mimeType: "application/json"
+  }
+}
+```
+
+### Paywall Support
+
+When a browser (Accept: text/html) requests a paid endpoint without payment, the middleware returns an interactive paywall page instead of a JSON error.
+
+**Setup:**
+
+1. Install the paywall package:
+   ```bash
+   bun add @x402/paywall
+   ```
+
+2. Create and configure the provider:
+   ```typescript
+   import { createPaywall, evmPaywall, svmPaywall } from "@x402/paywall";
+
+   const paywallProvider = createPaywall()
+     .withNetwork(evmPaywall)   // EVM chains
+     .withNetwork(svmPaywall)   // Solana
+     .build();
+   ```
+
+3. Pass to middleware config:
+   ```typescript
+   createElysiaPaidRoutes(app, {
+     middleware: {
+       resourceServer,
+       paywallProvider,
+       paywallConfig: {
+         appName: "My App",
+         testnet: true,  // Show testnet warning
+       },
+     },
+   });
+   ```
+
+**Paywall Config Options:**
+
+| Option | Type | Description |
+| ------ | ---- | ----------- |
+| `appName` | `string` | Application name shown in paywall |
+| `testnet` | `boolean` | Display testnet warning banner |
 
 ## Testing
 
