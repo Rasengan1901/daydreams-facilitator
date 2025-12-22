@@ -14,24 +14,38 @@ import {
   TRACKING_ERROR_MESSAGES,
   TRACKING_ERROR_STATUS,
   type TrackingResult,
-  type UptoSessionStore,
+  type UptoModule,
 } from "../upto/lib.js";
-import {
-  createResourceServer,
-  type ResourceServerConfig,
-} from "../server.js";
+import { createResourceServer, type ResourceServerConfig } from "../server.js";
 
 export interface ElysiaPaymentState {
   result: HTTPProcessResult;
   tracking?: TrackingResult;
 }
 
-export interface ElysiaPaymentMiddlewareConfig {
+type RequireAtLeastOne<T, Keys extends keyof T = keyof T> = {
+  [Key in Keys]-?: Required<Pick<T, Key>> & Partial<Omit<T, Key>>;
+}[Keys];
+
+type ResourceServerRequirement = RequireAtLeastOne<{
+  /** Prebuilt HTTP resource server (highest priority). */
   httpServer?: x402HTTPResourceServer;
+  /** Prebuilt resource server instance. */
   resourceServer?: x402ResourceServer;
+  /** Facilitator client used to build a resource server. */
   facilitatorClient?: FacilitatorClient;
+}>;
+
+export type ElysiaPaymentMiddlewareConfig = ResourceServerRequirement & {
+  /** Explicit routes config for the HTTP resource server. */
   routes?: RoutesConfig;
+  /** Lazy route config resolver (used when routes are collected later). */
+  routesResolver?: () => RoutesConfig;
+  /** Optional resource server config (used when facilitatorClient is provided). */
   serverConfig?: ResourceServerConfig;
+  scope?: "local" | "scoped" | "global";
+  pluginName?: string;
+  pluginSeed?: unknown;
   paywallConfig?:
     | PaywallConfig
     | ((ctx: { request: Request }) => PaywallConfig | Promise<PaywallConfig>);
@@ -39,34 +53,28 @@ export interface ElysiaPaymentMiddlewareConfig {
   paymentHeaderAliases?: Array<string>;
   autoSettle?: boolean;
   syncFacilitatorOnStart?: boolean;
-  upto?: {
-    store: UptoSessionStore;
-    autoTrack?: boolean;
-  };
-}
+  upto?: UptoModule;
+};
 
 const DEFAULT_PAYMENT_HEADER_ALIASES = ["x-payment"];
-const DEBUG_ENV_KEY = "X402_DEBUG";
-const debugEnabled =
-  process.env[DEBUG_ENV_KEY] === "1" ||
-  process.env[DEBUG_ENV_KEY]?.toLowerCase() === "true";
-
-function debugLog(message: string, meta?: Record<string, unknown>): void {
-  if (!debugEnabled) return;
-  if (meta) {
-    // eslint-disable-next-line no-console
-    console.log("[x402][elysia]", message, meta);
-    return;
-  }
-  // eslint-disable-next-line no-console
-  console.log("[x402][elysia]", message);
-}
+const DEFAULT_PLUGIN_NAME = "x402-elysia-payments";
+type HeaderValue = string | number;
+type HeaderRecord = Record<string, HeaderValue>;
 
 function mergeHeaders(
-  current: Record<string, string> | undefined,
-  next: Record<string, string>
-): Record<string, string> {
+  current: HeaderRecord | undefined,
+  next: HeaderRecord
+): HeaderRecord {
   return { ...(current ?? {}), ...next };
+}
+
+function isUptoModule(value: unknown): value is UptoModule {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as UptoModule).createSweeper === "function" &&
+    typeof (value as UptoModule).settleSession === "function"
+  );
 }
 
 type ElysiaRequestContext = {
@@ -78,83 +86,6 @@ type ElysiaRequestContext = {
 
 function normalizePathCandidate(value: string): string {
   return value.startsWith("/") ? value : `/${value}`;
-}
-
-function normalizePrefix(value: string): string {
-  if (value === "/") return "";
-  return value.replace(/\/+$/, "");
-}
-
-function getStaticPrefix(routePath: string): string {
-  const match = routePath.search(/\/(\*|\[)/);
-  const staticPath = match === -1 ? routePath : routePath.slice(0, match);
-  const normalized = normalizePathCandidate(staticPath).replace(/\/+$/, "");
-  const lastSlash = normalized.lastIndexOf("/");
-
-  if (lastSlash <= 0) return "";
-  return normalized.slice(0, lastSlash);
-}
-
-function getRoutePatternPaths(routes?: RoutesConfig): string[] {
-  if (!routes) return [];
-
-  if ("accepts" in routes) {
-    return ["*"];
-  }
-
-  return Object.keys(routes).map((pattern) => {
-    const [, rawPath] = pattern.includes(" ")
-      ? pattern.split(/\s+/)
-      : ["*", pattern];
-    return normalizePathCandidate(rawPath);
-  });
-}
-
-function expandPathCandidates(
-  baseCandidates: string[],
-  routePatterns: string[]
-): string[] {
-  const candidates = new Set(baseCandidates);
-  const prefixes = new Set<string>();
-
-  for (const pattern of routePatterns) {
-    if (pattern === "*") continue;
-    const prefix = normalizePrefix(getStaticPrefix(pattern));
-    if (prefix) {
-      prefixes.add(prefix);
-    }
-  }
-
-  for (const prefix of prefixes) {
-    for (const candidate of baseCandidates) {
-      if (!candidate.startsWith(prefix)) {
-        candidates.add(normalizePathCandidate(`${prefix}${candidate}`));
-      }
-
-      if (candidate.startsWith(prefix)) {
-        const stripped = candidate.slice(prefix.length) || "/";
-        candidates.add(normalizePathCandidate(stripped));
-      }
-    }
-  }
-
-  return Array.from(candidates);
-}
-
-function getPathCandidates(ctx: ElysiaRequestContext, fallback: string): string[] {
-  const candidates = new Set<string>();
-  candidates.add(normalizePathCandidate(resolveUrl(ctx.request).pathname));
-  candidates.add(normalizePathCandidate(fallback));
-
-  if (typeof ctx.path === "string" && ctx.path.length > 0) {
-    candidates.add(normalizePathCandidate(ctx.path));
-  }
-
-  if (typeof ctx.route === "string" && ctx.route.length > 0) {
-    candidates.add(normalizePathCandidate(ctx.route));
-  }
-
-  return Array.from(candidates);
 }
 
 function resolveUrl(request: Request): URL {
@@ -225,14 +156,26 @@ async function resolvePaywallConfig(
   return source;
 }
 
-function resolveHttpServer(
+function resolveRoutes(config: ElysiaPaymentMiddlewareConfig): RoutesConfig {
+  if (config.routes) return config.routes;
+  if (config.routesResolver) {
+    const resolved = config.routesResolver();
+    if (!resolved) {
+      throw new Error(
+        "Elysia payment middleware requires routes from routesResolver."
+      );
+    }
+    return resolved;
+  }
+  throw new Error("Elysia payment middleware requires routes.");
+}
+
+function buildHttpServer(
   config: ElysiaPaymentMiddlewareConfig
 ): x402HTTPResourceServer {
   if (config.httpServer) return config.httpServer;
 
-  if (!config.routes) {
-    throw new Error("Elysia payment middleware requires routes.");
-  }
+  const routes = resolveRoutes(config);
 
   const resourceServer =
     config.resourceServer ??
@@ -246,78 +189,69 @@ function resolveHttpServer(
     );
   }
 
-  return new x402HTTPResourceServer(resourceServer, config.routes);
+  return new x402HTTPResourceServer(resourceServer, routes);
 }
 
 export function createElysiaPaymentMiddleware(
   config: ElysiaPaymentMiddlewareConfig
-): (app: Elysia) => Elysia {
-  const httpServer = resolveHttpServer(config);
+) {
+  let httpServer: x402HTTPResourceServer | undefined;
+  const getHttpServer = (): x402HTTPResourceServer => {
+    if (!httpServer) {
+      httpServer = buildHttpServer(config);
+      if (config.paywallProvider) {
+        httpServer.registerPaywallProvider(config.paywallProvider);
+      }
+    }
+    return httpServer;
+  };
   const paymentHeaderAliases =
     config.paymentHeaderAliases ?? DEFAULT_PAYMENT_HEADER_ALIASES;
   const autoSettle = config.autoSettle ?? true;
-  const autoTrack = config.upto?.autoTrack ?? true;
-  const routePatterns = getRoutePatternPaths(config.routes);
+  const scope = config.scope ?? "scoped";
+  const pluginName = config.pluginName ?? DEFAULT_PLUGIN_NAME;
+  const uptoModule = config.upto;
+  if (config.upto !== undefined && !isUptoModule(config.upto)) {
+    throw new Error("Upto middleware requires an upto module.");
+  }
+  const sweeperEnabled = Boolean(uptoModule?.autoSweeper);
+  const shouldTrackUpto = Boolean(uptoModule?.autoTrack);
 
-  if (config.paywallProvider) {
-    httpServer.registerPaywallProvider(config.paywallProvider);
+  const app = new Elysia({
+    name: pluginName,
+    ...(config.pluginSeed !== undefined ? { seed: config.pluginSeed } : {}),
+  }).decorate("x402", null as ElysiaPaymentState | null);
+
+  if (sweeperEnabled) {
+    if (uptoModule?.sweeper) {
+      app.use(uptoModule.sweeper);
+    } else if (uptoModule?.createSweeper) {
+      app.use(uptoModule.createSweeper());
+    }
   }
 
-  debugLog("initialized", {
-    routes: routePatterns,
-    autoSettle,
-    autoTrack,
-  });
+  if (config.syncFacilitatorOnStart ?? true) {
+    app.onStart(async () => {
+      await getHttpServer().initialize();
+    });
+  }
 
-  return (app: Elysia) => {
-    if (config.syncFacilitatorOnStart ?? true) {
-      app.onStart(async () => {
-        await httpServer.initialize();
-      });
-    }
-
-    app.onBeforeHandle({ as: "global" }, async (ctx) => {
+  app.onBeforeHandle({ as: scope }, async (ctx) => {
+    const httpServer = getHttpServer();
     const adapter = createAdapter(ctx, paymentHeaderAliases);
     const paywallConfig = await resolvePaywallConfig(config.paywallConfig, ctx);
-    const requestUrl = resolveUrl(ctx.request);
-    const paymentHeader = adapter.getHeader("payment-signature");
+    const path = adapter.getPath();
 
-    const pathCandidates = expandPathCandidates(
-      getPathCandidates(ctx, adapter.getPath()),
-      routePatterns
+    const result = await httpServer.processHTTPRequest(
+      {
+        adapter,
+        path,
+        method: adapter.getMethod(),
+      },
+      paywallConfig
     );
 
-    debugLog("request", {
-      method: adapter.getMethod(),
-      adapterPath: adapter.getPath(),
-      urlPathname: requestUrl.pathname,
-      ctxPath: ctx.path,
-      ctxRoute: ctx.route,
-      hasPaymentHeader: Boolean(paymentHeader),
-    });
-    debugLog("pathCandidates", { candidates: pathCandidates });
-
-    let result: HTTPProcessResult = { type: "no-payment-required" };
-
-    for (const candidate of pathCandidates) {
-      const attempt = await httpServer.processHTTPRequest(
-        {
-          adapter,
-          path: candidate,
-          method: adapter.getMethod(),
-        },
-        paywallConfig
-      );
-
-      debugLog("processAttempt", { path: candidate, result: attempt.type });
-      result = attempt;
-      if (attempt.type !== "no-payment-required") {
-        break;
-      }
-    }
-
-    const ctxState = ctx as { x402?: ElysiaPaymentState };
-    ctxState.x402 = { result };
+    ctx.x402 = { result };
 
     if (result.type === "payment-error") {
       ctx.set.status = result.response.status;
@@ -327,17 +261,21 @@ export function createElysiaPaymentMiddleware(
 
     if (
       result.type === "payment-verified" &&
-      result.paymentRequirements.scheme === "upto" &&
-      config.upto &&
-      autoTrack
+      result.paymentRequirements.scheme === "upto"
     ) {
+      if (!uptoModule) {
+        throw new Error("Upto middleware requires an upto module.");
+      }
+      if (!shouldTrackUpto) {
+        return;
+      }
       const tracking = trackUptoPayment(
-        config.upto.store,
+        uptoModule.store,
         result.paymentPayload,
         result.paymentRequirements
       );
 
-      ctxState.x402 = { result, tracking };
+      ctx.x402 = { result, tracking };
 
       if (!tracking.success) {
         ctx.set.status = TRACKING_ERROR_STATUS[tracking.error];
@@ -350,16 +288,11 @@ export function createElysiaPaymentMiddleware(
           sessionId: tracking.sessionId,
         };
       }
-
-      ctx.set.headers = mergeHeaders(ctx.set.headers, {
-        "x-upto-session-id": tracking.sessionId,
-      });
     }
   });
 
-    app.onAfterHandle({ as: "global" }, async (ctx) => {
-    const ctxState = ctx as { x402?: ElysiaPaymentState };
-    const state = ctxState.x402;
+  app.onAfterHandle({ as: scope }, async (ctx) => {
+    const state = ctx.x402;
 
     if (!state || state.result.type !== "payment-verified") return;
 
@@ -374,6 +307,7 @@ export function createElysiaPaymentMiddleware(
 
     if (!autoSettle) return;
 
+    const httpServer = getHttpServer();
     const settlement = await httpServer.processSettlement(
       state.result.paymentPayload,
       state.result.paymentRequirements
@@ -384,6 +318,5 @@ export function createElysiaPaymentMiddleware(
     }
   });
 
-    return app;
-  };
+  return app;
 }

@@ -10,7 +10,8 @@ import type { Account } from "starknet";
 import {
   createPaymentPayload,
   DEFAULT_PAYMASTER_ENDPOINTS,
-  validateNetwork,
+  PAYMENT_REQUIREMENTS_SCHEMA,
+  type PaymentRequirements as StarknetPaymentRequirements,
   type StarknetNetworkId,
 } from "x402-starknet";
 
@@ -32,10 +33,6 @@ export interface ExactStarknetClientConfig extends ExactStarknetClientSchemeConf
   networks?: StarknetNetworkId | StarknetNetworkId[];
 }
 
-type PaymentPayloadWithTypedData = PaymentPayload & {
-  typedData: Record<string, unknown>;
-};
-
 const DEFAULT_STARKNET_CLIENT_NETWORKS: StarknetNetworkId[] = [
   "starknet:mainnet",
   "starknet:sepolia",
@@ -46,14 +43,26 @@ const DEFAULT_STARKNET_CLIENT_NETWORKS: StarknetNetworkId[] = [
 // ============================================================================
 
 export function assertStarknetTypedData(
-  payload: PaymentPayload
-): asserts payload is PaymentPayloadWithTypedData {
+  payload: unknown
+): asserts payload is { typedData: Record<string, unknown> } {
   const typedData = (payload as { typedData?: unknown }).typedData;
   const isObject =
     typeof typedData === "object" && typedData !== null && !Array.isArray(typedData);
   if (!isObject) {
     throw new Error("Starknet payment payload missing typedData (required).");
   }
+}
+
+function toStarknetRequirements(
+  requirements: PaymentRequirements
+): StarknetPaymentRequirements {
+  const parsed = PAYMENT_REQUIREMENTS_SCHEMA.safeParse(requirements);
+  if (parsed.success) {
+    return parsed.data;
+  }
+
+  const message = parsed.error.issues.map((issue) => issue.message).join("; ");
+  throw new Error(`Invalid Starknet payment requirements: ${message}`);
 }
 
 function resolvePaymasterEndpoint(
@@ -102,8 +111,14 @@ export class ExactStarknetClientScheme implements SchemeNetworkClient {
   async createPaymentPayload(
     x402Version: number,
     requirements: PaymentRequirements
-  ): Promise<Pick<PaymentPayload, "x402Version" | "payload">> {
-    const network = validateNetwork(requirements.network);
+  ): Promise<
+    Pick<PaymentPayload, "x402Version" | "payload"> & {
+      typedData: Record<string, unknown>;
+      paymasterEndpoint: string;
+    }
+  > {
+    const starknetRequirements = toStarknetRequirements(requirements);
+    const network = starknetRequirements.network;
     const paymasterEndpoint = resolvePaymasterEndpoint(
       network,
       this.paymasterEndpoint
@@ -116,7 +131,7 @@ export class ExactStarknetClientScheme implements SchemeNetworkClient {
     const paymentPayload = await createPaymentPayload(
       this.account,
       x402Version,
-      requirements,
+      starknetRequirements,
       {
         endpoint: paymasterEndpoint,
         network,
@@ -127,11 +142,11 @@ export class ExactStarknetClientScheme implements SchemeNetworkClient {
     assertStarknetTypedData(paymentPayload);
 
     return {
-      x402Version,
-      payload: paymentPayload.payload,
+      x402Version: paymentPayload.x402Version,
+      payload: paymentPayload.payload as unknown as Record<string, unknown>,
       typedData: paymentPayload.typedData,
       paymasterEndpoint: paymentPayload.paymasterEndpoint ?? paymasterEndpoint,
-    } as PaymentPayload;
+    };
   }
 }
 

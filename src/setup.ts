@@ -100,23 +100,24 @@ async function createDefaultSigners(): Promise<{
     // CDP doesn't support SVM yet, use private key signer if available
     const svmSigners: SvmSignerConfig[] = [];
     if (SVM_PRIVATE_KEY) {
-      const { svmSigner } = await import("./signers/index.js");
-      if (svmSigner) {
-        // Register for each configured SVM network
-        const svmNetworkSetups = getSvmNetworkSetups();
-        for (const network of svmNetworkSetups) {
-          svmSigners.push({
-            signer: svmSigner,
-            networks: network.caip as NetworkId,
-          });
-        }
+      const { createPrivateKeySvmSigner } = await import(
+        "./signers/index.js"
+      );
+      const svmSigner = await createPrivateKeySvmSigner();
+      // Register for each configured SVM network
+      const svmNetworkSetups = getSvmNetworkSetups();
+      for (const network of svmNetworkSetups) {
+        svmSigners.push({
+          signer: svmSigner,
+          networks: network.caip as NetworkId,
+        });
       }
     }
 
     return { evmSigners, svmSigners, starknetConfigs };
   } else {
     // Private Key Signer (fallback)
-    const { createPrivateKeyEvmSigner, svmSigner } =
+    const { createPrivateKeyEvmSigner, createPrivateKeySvmSigner } =
       await import("./signers/index.js");
 
     const evmSigners: EvmSignerConfig[] = [];
@@ -146,7 +147,8 @@ async function createDefaultSigners(): Promise<{
     }
 
     const svmSigners: SvmSignerConfig[] = [];
-    if (svmSigner) {
+    if (SVM_PRIVATE_KEY) {
+      const svmSigner = await createPrivateKeySvmSigner();
       // Register for each configured SVM network
       const svmNetworkSetups = getSvmNetworkSetups();
       for (const network of svmNetworkSetups) {

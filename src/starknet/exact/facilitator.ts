@@ -16,6 +16,8 @@ import {
   createProvider,
   verifyPayment,
   settlePayment,
+  PAYMENT_PAYLOAD_SCHEMA,
+  PAYMENT_REQUIREMENTS_SCHEMA,
   type PaymentPayload as StarknetPaymentPayload,
   type PaymentRequirements as StarknetPaymentRequirements,
   type StarknetNetworkId,
@@ -34,17 +36,27 @@ export interface StarknetConfig {
   sponsorAddress: string;
 }
 
-type PaymentPayloadWithTypedData = PaymentPayload & {
-  typedData: Record<string, unknown>;
-};
-
 function hasTypedData(
-  payload: PaymentPayload
-): payload is PaymentPayloadWithTypedData {
+  payload: StarknetPaymentPayload
+): payload is StarknetPaymentPayload & { typedData: Record<string, unknown> } {
   const typedData = (payload as { typedData?: unknown }).typedData;
   return (
     typeof typedData === "object" && typedData !== null && !Array.isArray(typedData)
   );
+}
+
+function parseStarknetPayload(
+  payload: PaymentPayload
+): StarknetPaymentPayload | null {
+  const parsed = PAYMENT_PAYLOAD_SCHEMA.safeParse(payload);
+  return parsed.success ? parsed.data : null;
+}
+
+function parseStarknetRequirements(
+  requirements: PaymentRequirements
+): StarknetPaymentRequirements | null {
+  const parsed = PAYMENT_REQUIREMENTS_SCHEMA.safeParse(requirements);
+  return parsed.success ? parsed.data : null;
 }
 
 export class ExactStarknetScheme implements SchemeNetworkFacilitator {
@@ -78,13 +90,22 @@ export class ExactStarknetScheme implements SchemeNetworkFacilitator {
     payload: PaymentPayload,
     requirements: PaymentRequirements
   ): Promise<VerifyResponse> {
-    if (!hasTypedData(payload)) {
+    const parsedPayload = parseStarknetPayload(payload);
+    const parsedRequirements = parseStarknetRequirements(requirements);
+
+    if (!parsedPayload) {
+      return { isValid: false, invalidReason: "invalid_payload" };
+    }
+    if (!parsedRequirements) {
+      return { isValid: false, invalidReason: "invalid_payment_requirements" };
+    }
+    if (!hasTypedData(parsedPayload)) {
       return { isValid: false, invalidReason: "invalid_payload" };
     }
     return verifyPayment(
       this.provider,
-      payload as StarknetPaymentPayload,
-      requirements as StarknetPaymentRequirements
+      parsedPayload,
+      parsedRequirements
     );
   }
 
@@ -92,7 +113,28 @@ export class ExactStarknetScheme implements SchemeNetworkFacilitator {
     payload: PaymentPayload,
     requirements: PaymentRequirements
   ): Promise<SettleResponse> {
-    if (!hasTypedData(payload)) {
+    const parsedPayload = parseStarknetPayload(payload);
+    const parsedRequirements = parseStarknetRequirements(requirements);
+
+    if (!parsedPayload) {
+      return {
+        success: false,
+        errorReason: "invalid_payload",
+        transaction: "",
+        network: requirements.network,
+      };
+    }
+
+    if (!parsedRequirements) {
+      return {
+        success: false,
+        errorReason: "invalid_payment_requirements",
+        transaction: "",
+        network: requirements.network,
+      };
+    }
+
+    if (!hasTypedData(parsedPayload)) {
       return {
         success: false,
         errorReason: "invalid_payload",
@@ -102,8 +144,8 @@ export class ExactStarknetScheme implements SchemeNetworkFacilitator {
     }
     return settlePayment(
       this.provider,
-      payload as StarknetPaymentPayload,
-      requirements as StarknetPaymentRequirements,
+      parsedPayload,
+      parsedRequirements,
       {
         paymasterConfig: {
           endpoint: this.config.paymasterEndpoint,

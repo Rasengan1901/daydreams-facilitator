@@ -87,14 +87,16 @@
   },
   "dependencies": {
     "@elysiajs/static": "^1.4.7",
+    "@types/express": "^5.0.6",
     "@x402/core": "2.0.0",
     "@x402/evm": "2.0.0",
     "@x402/hono": "^2.0.0",
     "@x402/svm": "2.0.0",
+    "express": "^5.2.1",
     "hono": "^4.11.1",
     "starknet": "^9.2.1",
-    "x402-starknet": "^1.0.0",
-    "viem": "^2.21.54"
+    "viem": "^2.21.54",
+    "x402-starknet": "^1.0.0"
   },
   "peerDependencies": {
     "@coinbase/cdp-sdk": ">=1.40.0",

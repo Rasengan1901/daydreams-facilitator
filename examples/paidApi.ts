@@ -19,10 +19,14 @@ import { Elysia } from "elysia";
 import { node } from "@elysiajs/node";
 import { HTTPFacilitatorClient } from "@x402/core/http";
 
-import { createElysiaPaymentMiddleware } from "../src/elysia/index.js";
-import { evmAccount, svmAccount } from "../src/signers/index.js";
+import { createElysiaPaidRoutes } from "../src/elysia/index.js";
+import {
+  createPrivateKeyEvmSigner,
+  createPrivateKeySvmSigner,
+} from "../src/signers/index.js";
 import { createResourceServer } from "../src/server.js";
 import { createUptoModule, formatSession } from "../src/upto/lib.js";
+import { getRpcUrl } from "../src/config.js";
 
 // ============================================================================
 // Configuration
@@ -33,19 +37,29 @@ const FACILITATOR_URL =
   process.env.FACILITATOR_URL ??
   `http://localhost:${process.env.FACILITATOR_PORT ?? 8090}`;
 
+const evmRpcUrl = getRpcUrl("base") ?? "https://mainnet.base.org";
+const evmSigner = createPrivateKeyEvmSigner({
+  network: "base",
+  rpcUrl: evmRpcUrl,
+});
+const [evmAddress] = evmSigner.getAddresses();
+const svmSigner = await createPrivateKeySvmSigner();
+const [svmAddress] = svmSigner.getAddresses();
+
 // ============================================================================
 // Setup
 // ============================================================================
 
 const facilitatorClient = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
 
-// Create upto module with automatic sweeper
+// Create upto module for session store + manual settlement
 const upto = createUptoModule({
   facilitatorClient,
   sweeperConfig: {
     intervalMs: 30_000,
     idleSettleMs: 2 * 60_000,
   },
+  autoSweeper: true,
 });
 
 // Resource server with all payment schemes
@@ -55,77 +69,70 @@ const resourceServer = createResourceServer(facilitatorClient);
 // Route Configuration
 // ============================================================================
 
-const routes = {
-  "GET /api/premium": {
-    accepts: {
-      scheme: "exact",
-      network: "eip155:8453",
-      payTo: evmAccount.address,
-      price: "$0.01",
-    },
-    description: "Premium content (EVM)",
-    mimeType: "application/json",
-  },
-  "GET /api/premium-solana": {
-    accepts: {
-      scheme: "exact",
-      network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
-      payTo: svmAccount.address,
-      price: "$0.01",
-    },
-    description: "Premium content (Solana)",
-    mimeType: "application/json",
-  },
-  "GET /api/upto-premium": {
-    accepts: {
-      scheme: "upto",
-      network: "eip155:8453",
-      payTo: evmAccount.address,
-      price: {
-        amount: "10000", // $0.01 per request (USDC 6 decimals)
-        asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        extra: {
-          name: "USD Coin",
-          version: "2",
-          maxAmountRequired: "50000", // $0.05 cap
-        },
-      },
-    },
-    description: "Premium content (batched payments)",
-    mimeType: "application/json",
-  },
-} as const;
-
-const paymentMiddleware = createElysiaPaymentMiddleware({
-  resourceServer,
-  routes,
-  upto: { store: upto.store },
-});
-
-// ============================================================================
-// Elysia Application
-// ============================================================================
-
 export const app = new Elysia({
   prefix: "/api",
   name: "paidApi",
   adapter: node(),
+});
+
+createElysiaPaidRoutes(app, {
+  basePath: "/api",
+  middleware: {
+    resourceServer,
+    upto,
+  },
 })
-  .use(upto.sweeper)
-  .use(paymentMiddleware)
+  .get("/premium", () => ({ message: "premium content (evm)" }), {
+    payment: {
+      accepts: {
+        scheme: "exact",
+        network: "eip155:8453",
+        payTo: evmAddress,
+        price: "$0.01",
+      },
+      description: "Premium content (EVM)",
+      mimeType: "application/json",
+    },
+  })
+  .get("/premium-solana", () => ({ message: "premium content (solana)" }), {
+    payment: {
+      accepts: {
+        scheme: "exact",
+        network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+        payTo: svmAddress,
+        price: "$0.01",
+      },
+      description: "Premium content (Solana)",
+      mimeType: "application/json",
+    },
+  })
+  .get("/upto-premium", () => ({ message: "premium content (upto evm)" }), {
+    payment: {
+      accepts: {
+        scheme: "upto",
+        network: "eip155:8453",
+        payTo: evmAddress,
+        price: {
+          amount: "10000", // $0.01 per request (USDC 6 decimals)
+          asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          extra: {
+            name: "USD Coin",
+            version: "2",
+            maxAmountRequired: "50000", // $0.05 cap
+          },
+        },
+      },
+      description: "Premium content (batched payments)",
+      mimeType: "application/json",
+    },
+  });
 
-  // ---- Routes ----
-
-  .get("/premium", () => ({ message: "premium content (evm)" }))
-  .get("/premium-solana", () => ({ message: "premium content (solana)" }))
-  .get("/upto-premium", () => ({ message: "premium content (upto evm)" }))
-
+app
   .get("/upto-session/:id", ({ params }) => {
     const session = upto.store.get(params.id);
     if (!session) return { error: "unknown_session" };
     return { id: params.id, ...formatSession(session) };
   })
-
   .post("/upto-close", async ({ body, set }) => {
     const { sessionId } = body as { sessionId?: string };
     if (!sessionId) {

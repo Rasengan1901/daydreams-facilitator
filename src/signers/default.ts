@@ -6,7 +6,11 @@
 import { base58 } from "@scure/base";
 import { createKeyPairSignerFromBytes } from "@solana/kit";
 import { toFacilitatorEvmSigner, type FacilitatorEvmSigner } from "@x402/evm";
-import { toFacilitatorSvmSigner } from "@x402/svm";
+import {
+  toFacilitatorSvmSigner,
+  type FacilitatorRpcConfig,
+  type FacilitatorSvmSigner,
+} from "@x402/svm";
 import { createWalletClient, http, publicActions, type Chain } from "viem";
 import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import {
@@ -26,12 +30,7 @@ import {
   sepolia,
 } from "viem/chains";
 
-import {
-  EVM_PRIVATE_KEY,
-  SVM_PRIVATE_KEY,
-  EVM_RPC_URL_BASE,
-  EVM_RPC_URL_BASE_SEPOLIA,
-} from "../config.js";
+import { EVM_PRIVATE_KEY, SVM_PRIVATE_KEY } from "../config.js";
 
 // ============================================================================
 // Network to Chain Mapping
@@ -99,6 +98,35 @@ export function createPrivateKeyEvmSigner(
   return createSignerFromAccount(account, chain, rpcUrl);
 }
 
+export interface PrivateKeySvmSignerConfig {
+  /** Optional private key override (defaults to SVM_PRIVATE_KEY env var) */
+  privateKey?: string;
+  /** Optional RPC configuration for the facilitator signer */
+  rpcConfig?: FacilitatorRpcConfig;
+}
+
+/**
+ * Creates a FacilitatorSvmSigner from a private key.
+ *
+ * @example
+ * ```typescript
+ * const signer = await createPrivateKeySvmSigner();
+ * ```
+ */
+export async function createPrivateKeySvmSigner(
+  config: PrivateKeySvmSignerConfig = {}
+): Promise<FacilitatorSvmSigner> {
+  const key = config.privateKey ?? SVM_PRIVATE_KEY;
+  if (!key) {
+    throw new Error(
+      "Private key signer requires SVM_PRIVATE_KEY or privateKey option"
+    );
+  }
+
+  const signer = await createKeyPairSignerFromBytes(base58.decode(key));
+  return toFacilitatorSvmSigner(signer, config.rpcConfig);
+}
+
 /**
  * Create a FacilitatorEvmSigner from an account and chain config
  */
@@ -151,58 +179,3 @@ function createSignerFromAccount(
       client.waitForTransactionReceipt(args),
   });
 }
-
-// ============================================================================
-// Legacy Default Signers (for backwards compatibility)
-// ============================================================================
-
-// These legacy exports are conditionally initialized
-// New code should use createPrivateKeyEvmSigner() instead
-
-let evmAccount: ReturnType<typeof privateKeyToAccount> | undefined;
-let svmAccount: Awaited<ReturnType<typeof createKeyPairSignerFromBytes>> | undefined;
-let baseSigner: FacilitatorEvmSigner | undefined;
-let baseSepoliaSigner: FacilitatorEvmSigner | undefined;
-let evmSigner: FacilitatorEvmSigner | undefined;
-let svmSigner: ReturnType<typeof toFacilitatorSvmSigner> | undefined;
-let viemClient: ReturnType<typeof createWalletClient> | undefined;
-
-// Initialize legacy EVM signers if private key is set
-if (EVM_PRIVATE_KEY) {
-  const normalizedEvmKey = EVM_PRIVATE_KEY.startsWith("0x")
-    ? EVM_PRIVATE_KEY
-    : `0x${EVM_PRIVATE_KEY}`;
-
-  evmAccount = privateKeyToAccount(normalizedEvmKey as `0x${string}`);
-
-  // Create legacy signers using the new factory
-  baseSigner = createPrivateKeyEvmSigner({
-    network: "base",
-    rpcUrl: EVM_RPC_URL_BASE ?? "https://mainnet.base.org",
-  });
-
-  baseSepoliaSigner = createPrivateKeyEvmSigner({
-    network: "base-sepolia",
-    rpcUrl: EVM_RPC_URL_BASE_SEPOLIA ?? "https://sepolia.base.org",
-  });
-
-  evmSigner = baseSigner;
-}
-
-// Initialize SVM signer if private key is set
-if (SVM_PRIVATE_KEY) {
-  svmAccount = await createKeyPairSignerFromBytes(
-    base58.decode(SVM_PRIVATE_KEY as string)
-  );
-  svmSigner = toFacilitatorSvmSigner(svmAccount);
-}
-
-export {
-  evmAccount,
-  svmAccount,
-  baseSigner,
-  baseSepoliaSigner,
-  evmSigner,
-  svmSigner,
-  viemClient,
-};

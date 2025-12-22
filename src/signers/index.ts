@@ -1,14 +1,9 @@
-// Default signers (from environment variables)
+// Private-key signer factories
 export {
-  evmSigner,
-  baseSigner,
-  baseSepoliaSigner,
-  svmSigner,
-  evmAccount,
-  svmAccount,
-  viemClient,
   createPrivateKeyEvmSigner,
+  createPrivateKeySvmSigner,
   type PrivateKeySignerConfig,
+  type PrivateKeySvmSignerConfig,
 } from "./default.js";
 
 // CDP signer adapter

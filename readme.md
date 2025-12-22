@@ -665,10 +665,12 @@ const upto = createUptoModule({
   facilitatorClient,
   // Optional: custom session store (defaults to InMemoryUptoSessionStore)
   // store: new RedisSessionStore(),
+  // Optional: sweeper configuration for auto settlement
+  // sweeperConfig: { intervalMs: 30_000, idleSettleMs: 120_000 },
 });
 
 // Use the sweeper plugin for automatic settlement
-app.use(upto.sweeper);
+app.use(upto.createSweeper());
 ```
 
 ### Tracking Payments
