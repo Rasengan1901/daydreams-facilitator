@@ -3,11 +3,16 @@ import {
   parseNetworkList,
   validateNetworks,
   validateSvmNetworks,
+  validateStarknetNetworks,
   resolveRpcUrl,
   resolveSvmRpcUrl,
+  resolveStarknetRpcUrl,
   getNetworkCaip,
   getSvmNetworkCaip,
+  getStarknetNetworkCaip,
   supportsV1,
+  STARKNET_CAIP_IDS,
+  toStarknetCanonicalCaip,
 } from "./networks.js";
 
 dotenv.config();
@@ -45,6 +50,10 @@ export const INFURA_API_KEY = process.env.INFURA_API_KEY;
 // SVM providers
 export const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 
+// Starknet providers / paymaster
+export const STARKNET_PAYMASTER_API_KEY = process.env.STARKNET_PAYMASTER_API_KEY;
+export const STARKNET_SPONSOR_ADDRESS = process.env.STARKNET_SPONSOR_ADDRESS;
+
 // ============================================================================
 // EVM Network Configuration
 // ============================================================================
@@ -67,6 +76,20 @@ const DEFAULT_SVM_NETWORKS = ["solana-devnet"];
 const configuredSvmNetworks = parseNetworkList(process.env.SVM_NETWORKS);
 export const SVM_NETWORKS_LIST = validateSvmNetworks(
   configuredSvmNetworks.length > 0 ? configuredSvmNetworks : DEFAULT_SVM_NETWORKS
+);
+
+// ============================================================================
+// Starknet Network Configuration
+// ============================================================================
+
+// Starknet networks to enable (comma-separated, e.g., "starknet-mainnet,starknet-sepolia")
+// Defaults to empty list (opt-in)
+const DEFAULT_STARKNET_NETWORKS: string[] = [];
+const configuredStarknetNetworks = parseNetworkList(process.env.STARKNET_NETWORKS);
+export const STARKNET_NETWORKS_LIST = validateStarknetNetworks(
+  configuredStarknetNetworks.length > 0
+    ? configuredStarknetNetworks
+    : DEFAULT_STARKNET_NETWORKS
 );
 
 // Legacy explicit RPC URLs (still supported for backwards compatibility)
@@ -114,6 +137,95 @@ export function getNetworkSetups(): NetworkSetup[] {
     caip: getNetworkCaip(name)!,
     rpcUrl: getRpcUrl(name),
     supportsV1: supportsV1(name),
+  }));
+}
+
+// ============================================================================
+// Starknet RPC + Paymaster Resolution
+// ============================================================================
+
+/**
+ * Get the RPC URL for a Starknet network.
+ *
+ * Resolution order:
+ * 1. Explicit env var (STARKNET_RPC_URL_STARKNET_MAINNET, etc.)
+ * 2. Alchemy (if ALCHEMY_API_KEY is set)
+ * 3. Public RPC fallback
+ */
+export function getStarknetRpcUrl(network: string): string | undefined {
+  const envKey = `STARKNET_RPC_URL_${network.toUpperCase().replace(/-/g, "_")}`;
+  const explicitUrl = process.env[envKey];
+
+  return resolveStarknetRpcUrl(network, {
+    explicitUrl,
+    alchemyApiKey: ALCHEMY_API_KEY,
+  });
+}
+
+function getStarknetPaymasterEndpoint(network: string): string | undefined {
+  const envKey = `STARKNET_PAYMASTER_ENDPOINT_${network
+    .toUpperCase()
+    .replace(/-/g, "_")}`;
+  const explicitUrl = process.env[envKey];
+  if (explicitUrl) return explicitUrl;
+
+  const caip = getStarknetNetworkCaip(network);
+  if (!caip) return undefined;
+
+  const canonicalCaip = caip ? toStarknetCanonicalCaip(caip) : undefined;
+
+  return canonicalCaip === STARKNET_CAIP_IDS.MAINNET
+    ? "https://starknet.paymaster.avnu.fi"
+    : "http://localhost:12777";
+}
+
+function getStarknetPaymasterApiKey(network: string): string | undefined {
+  const envKey = `STARKNET_PAYMASTER_API_KEY_${network
+    .toUpperCase()
+    .replace(/-/g, "_")}`;
+  return process.env[envKey] ?? STARKNET_PAYMASTER_API_KEY;
+}
+
+function getStarknetSponsorAddress(network: string): string | undefined {
+  const envKey = `STARKNET_SPONSOR_ADDRESS_${network
+    .toUpperCase()
+    .replace(/-/g, "_")}`;
+  return process.env[envKey] ?? STARKNET_SPONSOR_ADDRESS;
+}
+
+function requireStarknetSponsorAddress(network: string): string {
+  const envKey = `STARKNET_SPONSOR_ADDRESS_${network
+    .toUpperCase()
+    .replace(/-/g, "_")}`;
+  const sponsorAddress = getStarknetSponsorAddress(network);
+  if (!sponsorAddress) {
+    throw new Error(
+      `Missing Starknet sponsor address for ${network}. Set ${envKey} or STARKNET_SPONSOR_ADDRESS.`
+    );
+  }
+  return sponsorAddress;
+}
+
+/**
+ * Get Starknet network configuration for setup
+ */
+export interface StarknetNetworkSetup {
+  name: string;
+  caip: string;
+  rpcUrl: string | undefined;
+  paymasterEndpoint: string | undefined;
+  paymasterApiKey?: string;
+  sponsorAddress: string;
+}
+
+export function getStarknetNetworkSetups(): StarknetNetworkSetup[] {
+  return STARKNET_NETWORKS_LIST.map((name) => ({
+    name,
+    caip: getStarknetNetworkCaip(name)!,
+    rpcUrl: getStarknetRpcUrl(name),
+    paymasterEndpoint: getStarknetPaymasterEndpoint(name),
+    paymasterApiKey: getStarknetPaymasterApiKey(name),
+    sponsorAddress: requireStarknetSponsorAddress(name),
   }));
 }
 
@@ -214,5 +326,33 @@ if (SVM_PRIVATE_KEY && SVM_NETWORKS_LIST.length > 0) {
     const hasExplicit = !!process.env[envKey];
     const source = hasExplicit ? "explicit" : HELIUS_API_KEY ? "Helius" : "public";
     console.info(`   ${network}: ${source} RPC`);
+  }
+}
+
+// Log Starknet networks (opt-in)
+if (STARKNET_NETWORKS_LIST.length > 0) {
+  console.info(`✅ Starknet Networks: ${STARKNET_NETWORKS_LIST.join(", ")}`);
+  for (const network of STARKNET_NETWORKS_LIST) {
+    const rpcKey = `STARKNET_RPC_URL_${network.toUpperCase().replace(/-/g, "_")}`;
+    const hasRpcOverride = !!process.env[rpcKey];
+    const rpcSource = hasRpcOverride
+      ? "explicit"
+      : ALCHEMY_API_KEY
+        ? "Alchemy"
+        : "public";
+
+    const paymasterKey = `STARKNET_PAYMASTER_ENDPOINT_${network
+      .toUpperCase()
+      .replace(/-/g, "_")}`;
+    const paymasterSource = process.env[paymasterKey] ? "explicit" : "default";
+
+    const sponsorKey = `STARKNET_SPONSOR_ADDRESS_${network
+      .toUpperCase()
+      .replace(/-/g, "_")}`;
+    const sponsorAddress = process.env[sponsorKey] ?? STARKNET_SPONSOR_ADDRESS;
+
+    console.info(
+      `   ${network}: ${rpcSource} RPC, ${paymasterSource} paymaster, sponsor ${sponsorAddress ? "set" : "missing"}`
+    );
   }
 }

@@ -24,6 +24,7 @@ export {
   type SvmSignerConfig,
   type EvmSchemeType,
   type SvmSchemeType,
+  type StarknetConfig,
   type NetworkId,
   type FacilitatorHooks,
 } from "./factory.js";

@@ -158,6 +158,7 @@ const upto = createUptoModule({
   },
 });
 
+const sweeper = upto.createSweeper();
 
 // ============================================================================
 // Elysia Application
@@ -165,7 +166,7 @@ const upto = createUptoModule({
 
 const app = new Elysia({ adapter: node() })
   // Use the sweeper plugin from our upto module
-  .use(upto.sweeper)
+  .use(sweeper)
 
   // ---- API Routes ----
 

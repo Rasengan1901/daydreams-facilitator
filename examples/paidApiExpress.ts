@@ -1,11 +1,11 @@
 /**
- * Paid API Example - Resource Server with x402 Payment Middleware
+ * Paid API Example (Express) - Resource Server with x402 Payment Middleware
  *
  * Demonstrates a resource server that accepts both exact and upto payments.
  *
  * Usage:
  *   1. Start the facilitator: bun run dev
- *   2. Start this server: bun run examples/paidApi.ts
+ *   2. Start this server: bun run examples/paidApiExpress.ts
  *
  * Endpoints:
  *   GET  /api/premium        - Exact payment ($0.01 EVM)
@@ -15,13 +15,12 @@
  *   POST /api/upto-close     - Close and settle session
  */
 
-import { Elysia } from "elysia";
-import { node } from "@elysiajs/node";
+import express from "express";
 import { HTTPFacilitatorClient } from "@x402/core/http";
 
 import { createPaywall, evmPaywall, svmPaywall } from "@x402/paywall";
 
-import { createElysiaPaidRoutes } from "../src/elysia/index.js";
+import { createExpressPaidRoutes } from "../src/express/index.js";
 import {
   createPrivateKeyEvmSigner,
   createPrivateKeySvmSigner,
@@ -34,7 +33,7 @@ import { getRpcUrl } from "../src/config.js";
 // Configuration
 // ============================================================================
 
-const PORT = Number(4022);
+const PORT = Number(4024);
 const FACILITATOR_URL =
   process.env.FACILITATOR_URL ??
   `http://localhost:${process.env.FACILITATOR_PORT ?? 8090}`;
@@ -77,104 +76,118 @@ const paywallProvider = createPaywall()
 // Route Configuration
 // ============================================================================
 
-export const app = new Elysia({
-  prefix: "/api",
-  name: "paidApi",
-  adapter: node(),
-});
+const app = express();
+app.use(express.json());
 
-createElysiaPaidRoutes(app, {
+createExpressPaidRoutes(app, {
   basePath: "/api",
   middleware: {
     resourceServer,
     upto,
     paywallProvider,
     paywallConfig: {
-      appName: "Paid API Example",
+      appName: "Paid API Example (Express)",
       testnet: true,
     },
   },
 })
-  .get("/premium", () => ({ message: "premium content (evm)" }), {
-    payment: {
-      accepts: {
-        scheme: "exact",
-        network: "eip155:8453",
-        payTo: evmAddress,
-        price: "$0.01",
+  .get(
+    "/api/premium",
+    (_req, res) => res.json({ message: "premium content (evm)" }),
+    {
+      payment: {
+        accepts: {
+          scheme: "exact",
+          network: "eip155:8453",
+          payTo: evmAddress,
+          price: "$0.01",
+        },
+        description: "Premium content (EVM)",
+        mimeType: "application/json",
       },
-      description: "Premium content (EVM)",
-      mimeType: "application/json",
-    },
-  })
-  .get("/premium-solana", () => ({ message: "premium content (solana)" }), {
-    payment: {
-      accepts: {
-        scheme: "exact",
-        network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
-        payTo: svmAddress,
-        price: "$0.01",
+    }
+  )
+  .get(
+    "/api/premium-solana",
+    (_req, res) => res.json({ message: "premium content (solana)" }),
+    {
+      payment: {
+        accepts: {
+          scheme: "exact",
+          network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+          payTo: svmAddress,
+          price: "$0.01",
+        },
+        description: "Premium content (Solana)",
+        mimeType: "application/json",
       },
-      description: "Premium content (Solana)",
-      mimeType: "application/json",
-    },
-  })
-  .get("/upto-premium", () => ({ message: "premium content (upto evm)" }), {
-    payment: {
-      accepts: {
-        scheme: "upto",
-        network: "eip155:8453",
-        payTo: evmAddress,
-        price: {
-          amount: "10000", // $0.01 per request (USDC 6 decimals)
-          asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-          extra: {
-            name: "USD Coin",
-            version: "2",
-            maxAmountRequired: "50000", // $0.05 cap
+    }
+  )
+  .get(
+    "/api/upto-premium",
+    (_req, res) => res.json({ message: "premium content (upto evm)" }),
+    {
+      payment: {
+        accepts: {
+          scheme: "upto",
+          network: "eip155:8453",
+          payTo: evmAddress,
+          price: {
+            amount: "10000", // $0.01 per request (USDC 6 decimals)
+            asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            extra: {
+              name: "USD Coin",
+              version: "2",
+              maxAmountRequired: "50000", // $0.05 cap
+            },
           },
         },
+        description: "Premium content (batched payments)",
+        mimeType: "application/json",
       },
-      description: "Premium content (batched payments)",
-      mimeType: "application/json",
-    },
-  });
-
-app
-  .get("/upto-session/:id", ({ params }) => {
-    const session = upto.store.get(params.id);
-    if (!session) return { error: "unknown_session" };
-    return { id: params.id, ...formatSession(session) };
-  })
-  .post("/upto-close", async ({ body, set }) => {
-    const { sessionId } = body as { sessionId?: string };
-    if (!sessionId) {
-      set.status = 400;
-      return { error: "missing_session_id" };
     }
+  );
 
-    const session = upto.store.get(sessionId);
-    if (!session) {
-      set.status = 404;
-      return { error: "unknown_session" };
-    }
+// Non-paid routes
+app.get("/api/upto-session/:id", (req, res) => {
+  const session = upto.store.get(req.params.id);
+  if (!session) {
+    res.json({ error: "unknown_session" });
+    return;
+  }
+  res.json({ id: req.params.id, ...formatSession(session) });
+});
 
-    await upto.settleSession(sessionId, "manual_close", true);
+app.post("/api/upto-close", async (req, res) => {
+  const sessionId = req.body?.sessionId as string | undefined;
 
-    const updated = upto.store.get(sessionId);
-    return {
-      success: updated?.lastSettlement?.receipt.success ?? true,
-      ...formatSession(updated ?? session),
-    };
+  if (!sessionId) {
+    res.status(400).json({ error: "missing_session_id" });
+    return;
+  }
+
+  const session = upto.store.get(sessionId);
+  if (!session) {
+    res.status(404).json({ error: "unknown_session" });
+    return;
+  }
+
+  await upto.settleSession(sessionId, "manual_close", true);
+
+  const updated = upto.store.get(sessionId);
+  res.json({
+    success: updated?.lastSettlement?.receipt.success ?? true,
+    ...formatSession(updated ?? session),
   });
+});
 
 // ============================================================================
 // Start Server
 // ============================================================================
 
-app.listen(PORT);
-console.log(`
-Paid API listening on http://localhost:${PORT}
+app.listen(PORT, () => {
+  console.log(`
+Paid API (Express) listening on http://localhost:${PORT}
 Facilitator: ${FACILITATOR_URL}
 
 Endpoints:
@@ -184,3 +197,4 @@ Endpoints:
   GET  /api/upto-session/:id - Check session status
   POST /api/upto-close       - Close and settle session
 `);
+});

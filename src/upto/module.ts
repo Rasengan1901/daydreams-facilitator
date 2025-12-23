@@ -14,10 +14,14 @@
  *
  * // Custom Redis store
  * const redisStore = new RedisUptoSessionStore(redisClient);
- * const upto = createUptoModule({ store: redisStore, facilitatorClient });
+ * const upto = createUptoModule({
+ *   store: redisStore,
+ *   facilitatorClient,
+ *   sweeperConfig: { intervalMs: 15_000, idleSettleMs: 60_000 },
+ * });
  *
  * // Use in Elysia app
- * app.use(upto.sweeper);
+ * app.use(upto.createSweeper());
  *
  * // Access store for session management
  * const session = upto.store.get(sessionId);
@@ -27,6 +31,11 @@
 import { InMemoryUptoSessionStore, type UptoSessionStore } from "./store.js";
 import { createUptoSweeper, type UptoSweeperConfig } from "./sweeper.js";
 import { settleUptoSession, type UptoFacilitatorClient } from "./settlement.js";
+
+type UptoSweeperOverrides = Omit<
+  UptoSweeperConfig,
+  "store" | "facilitatorClient"
+>;
 
 export interface UptoModuleConfig {
   /**
@@ -41,15 +50,27 @@ export interface UptoModuleConfig {
 
   /**
    * Facilitator client for settling payments.
-   * Required for the sweeper to auto-settle sessions.
+   * Required for settlement and optional sweeping.
    */
   facilitatorClient: UptoFacilitatorClient;
 
   /**
-   * Sweeper configuration options.
-   * See UptoSweeperConfig for available options.
+   * Default sweeper configuration (optional).
+   * Use this to control sweep cadence and thresholds.
    */
-  sweeperConfig?: Omit<UptoSweeperConfig, "store" | "facilitatorClient">;
+  sweeperConfig?: UptoSweeperOverrides;
+
+  /**
+   * Enable automatic sweeper usage in middleware.
+   * Defaults to false; set to true to auto-attach in middleware.
+   */
+  autoSweeper?: boolean;
+
+  /**
+   * Enable automatic upto session tracking in middleware.
+   * Defaults to true.
+   */
+  autoTrack?: boolean;
 }
 
 export interface UptoModule {
@@ -60,11 +81,26 @@ export interface UptoModule {
   store: UptoSessionStore;
 
   /**
-   * Elysia plugin for automatic session sweeping.
-   * Monitors sessions and triggers settlements based on idle time,
-   * deadline proximity, and cap thresholds.
+   * Optional sweeper instance if created.
    */
-  sweeper: ReturnType<typeof createUptoSweeper>;
+  sweeper?: ReturnType<typeof createUptoSweeper>;
+
+  /**
+   * Whether middleware should auto-attach the sweeper.
+   */
+  autoSweeper: boolean;
+
+  /**
+   * Whether middleware should auto-track upto sessions.
+   */
+  autoTrack: boolean;
+
+  /**
+   * Create (or reuse) an Elysia sweeper plugin for automatic settlement.
+   */
+  createSweeper: (
+    overrides?: UptoSweeperOverrides
+  ) => ReturnType<typeof createUptoSweeper>;
 
   /**
    * Manually settle a session.
@@ -82,17 +118,14 @@ export interface UptoModule {
  *
  * This factory enables:
  * - Custom session store implementations for production scaling
- * - Configurable sweeper behavior
+ * - Explicit sweeper creation when needed
  * - Testable components with mock dependencies
  */
 export function createUptoModule(config: UptoModuleConfig): UptoModule {
   const store = config.store ?? new InMemoryUptoSessionStore();
-
-  const sweeper = createUptoSweeper({
-    store,
-    facilitatorClient: config.facilitatorClient,
-    ...config.sweeperConfig,
-  });
+  let sweeper: ReturnType<typeof createUptoSweeper> | undefined;
+  const autoSweeper = config.autoSweeper ?? false;
+  const autoTrack = config.autoTrack ?? true;
 
   const settleSession = async (
     sessionId: string,
@@ -108,9 +141,30 @@ export function createUptoModule(config: UptoModuleConfig): UptoModule {
     );
   };
 
+  const createSweeper = (overrides?: UptoSweeperOverrides) => {
+    if (!sweeper) {
+      const sweeperConfig = {
+        ...(config.sweeperConfig ?? {}),
+        ...(overrides ?? {}),
+      };
+      sweeper = createUptoSweeper({
+        store,
+        facilitatorClient: config.facilitatorClient,
+        ...sweeperConfig,
+      });
+    }
+
+    return sweeper;
+  };
+
   return {
     store,
-    sweeper,
+    autoTrack,
+    autoSweeper,
+    createSweeper,
+    get sweeper() {
+      return sweeper;
+    },
     settleSession,
   };
 }

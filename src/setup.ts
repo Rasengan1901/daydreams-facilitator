@@ -14,6 +14,7 @@ import {
   createFacilitator,
   type EvmSignerConfig,
   type SvmSignerConfig,
+  type StarknetConfig,
   type NetworkId,
 } from "./factory.js";
 import { createCdpEvmSigner, type CdpNetwork } from "./signers/cdp.js";
@@ -22,6 +23,7 @@ import {
   SVM_PRIVATE_KEY,
   CDP_ACCOUNT_NAME,
   getNetworkSetups,
+  getStarknetNetworkSetups,
   getSvmNetworkSetups,
   getRpcUrl,
 } from "./config.js";
@@ -36,8 +38,32 @@ export * from "./factory.js";
 async function createDefaultSigners(): Promise<{
   evmSigners: EvmSignerConfig[];
   svmSigners: SvmSignerConfig[];
+  starknetConfigs: StarknetConfig[];
 }> {
   const networkSetups = getNetworkSetups();
+  const starknetNetworkSetups = getStarknetNetworkSetups();
+
+  const starknetConfigs: StarknetConfig[] = [];
+  for (const network of starknetNetworkSetups) {
+    if (!network.rpcUrl) {
+      console.warn(`⚠️  No RPC URL for ${network.name} - skipping`);
+      continue;
+    }
+    if (!network.paymasterEndpoint) {
+      console.warn(`⚠️  No paymaster endpoint for ${network.name} - skipping`);
+      continue;
+    }
+
+    starknetConfigs.push({
+      network: network.caip as StarknetConfig["network"],
+      rpcUrl: network.rpcUrl,
+      paymasterEndpoint: network.paymasterEndpoint,
+      ...(network.paymasterApiKey
+        ? { paymasterApiKey: network.paymasterApiKey }
+        : {}),
+      sponsorAddress: network.sponsorAddress,
+    });
+  }
 
   if (USE_CDP) {
     // CDP Signer (preferred)
@@ -74,23 +100,24 @@ async function createDefaultSigners(): Promise<{
     // CDP doesn't support SVM yet, use private key signer if available
     const svmSigners: SvmSignerConfig[] = [];
     if (SVM_PRIVATE_KEY) {
-      const { svmSigner } = await import("./signers/index.js");
-      if (svmSigner) {
-        // Register for each configured SVM network
-        const svmNetworkSetups = getSvmNetworkSetups();
-        for (const network of svmNetworkSetups) {
-          svmSigners.push({
-            signer: svmSigner,
-            networks: network.caip as NetworkId,
-          });
-        }
+      const { createPrivateKeySvmSigner } = await import(
+        "./signers/index.js"
+      );
+      const svmSigner = await createPrivateKeySvmSigner();
+      // Register for each configured SVM network
+      const svmNetworkSetups = getSvmNetworkSetups();
+      for (const network of svmNetworkSetups) {
+        svmSigners.push({
+          signer: svmSigner,
+          networks: network.caip as NetworkId,
+        });
       }
     }
 
-    return { evmSigners, svmSigners };
+    return { evmSigners, svmSigners, starknetConfigs };
   } else {
     // Private Key Signer (fallback)
-    const { createPrivateKeyEvmSigner, svmSigner } =
+    const { createPrivateKeyEvmSigner, createPrivateKeySvmSigner } =
       await import("./signers/index.js");
 
     const evmSigners: EvmSignerConfig[] = [];
@@ -120,7 +147,8 @@ async function createDefaultSigners(): Promise<{
     }
 
     const svmSigners: SvmSignerConfig[] = [];
-    if (svmSigner) {
+    if (SVM_PRIVATE_KEY) {
+      const svmSigner = await createPrivateKeySvmSigner();
       // Register for each configured SVM network
       const svmNetworkSetups = getSvmNetworkSetups();
       for (const network of svmNetworkSetups) {
@@ -131,7 +159,7 @@ async function createDefaultSigners(): Promise<{
       }
     }
 
-    return { evmSigners, svmSigners };
+    return { evmSigners, svmSigners, starknetConfigs };
   }
 }
 

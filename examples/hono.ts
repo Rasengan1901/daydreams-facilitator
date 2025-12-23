@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { paymentMiddleware } from "@x402/hono";
 
-import { evmAccount } from "../src/signers/index.js";
+import { createPrivateKeyEvmSigner } from "../src/signers/index.js";
+import { getRpcUrl } from "../src/config.js";
 import {
   createResourceServer,
   HTTPFacilitatorClient,
@@ -11,7 +12,12 @@ import {
 } from "@daydreamsai/facilitator";
 
 const facilitatorUrl = process.env.FACILITATOR_URL ?? "http://localhost:8090";
-const evmAddress = evmAccount.address;
+const evmRpcUrl = getRpcUrl("base") ?? "https://mainnet.base.org";
+const evmSigner = createPrivateKeyEvmSigner({
+  network: "base",
+  rpcUrl: evmRpcUrl,
+});
+const [evmAddress] = evmSigner.getAddresses();
 
 const app = new Hono();
 

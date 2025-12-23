@@ -2,7 +2,7 @@
 
 > **Warning**: This project is currently in alpha. APIs may change without notice and should not be used in production environments without thorough testing.
 
-A production-ready payment settlement service for the [x402 protocol](https://github.com/coinbase/x402). Built with Elysia and Node.js, it verifies cryptographic payment signatures and settles transactions on-chain for EVM (Base) and SVM (Solana) networks.
+A production-ready payment settlement service for the [x402 protocol](https://github.com/coinbase/x402). Built with Elysia and Node.js, it verifies cryptographic payment signatures and settles transactions on-chain for EVM, SVM (Solana), and Starknet networks.
 
 ## Table of Contents
 
@@ -16,8 +16,14 @@ A production-ready payment settlement service for the [x402 protocol](https://gi
 - [Custom Signers](#custom-signers)
 - [API Reference](#api-reference)
 - [Payment Schemes](#payment-schemes)
+- [Unified Client](#unified-client)
 - [Upto Module](#upto-module)
 - [Resource Server](#resource-server)
+- [Framework Middleware](#framework-middleware)
+  - [Elysia](#elysia)
+  - [Hono](#hono)
+  - [Express](#express)
+  - [Paywall Support](#paywall-support)
 - [Testing](#testing)
 - [Production Deployment](#production-deployment)
 
@@ -39,6 +45,8 @@ The x402 Facilitator acts as a trusted intermediary between clients making payme
 | Optimism       | `eip155:10`                               | exact, upto |
 | Arbitrum       | `eip155:42161`                            | exact, upto |
 | Polygon        | `eip155:137`                              | exact, upto |
+| Starknet Mainnet | `starknet:SN_MAIN`                      | exact       |
+| Starknet Sepolia | `starknet:SN_SEPOLIA`                   | exact       |
 | Solana Devnet  | `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` | exact       |
 | Solana Mainnet | `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` | exact       |
 
@@ -86,6 +94,10 @@ The x402 Facilitator acts as a trusted intermediary between clients making payme
 | Upto Scheme         | `src/upto/evm/facilitator.ts` | Permit-based batched payments               |
 | Session Store       | `src/upto/store.ts`           | In-memory session management                |
 | Sweeper             | `src/upto/sweeper.ts`         | Background batch settlement                 |
+| Elysia Middleware   | `src/elysia/`                 | Payment middleware for Elysia               |
+| Hono Middleware     | `src/hono/`                   | Payment middleware for Hono                 |
+| Express Middleware  | `src/express/`                | Payment middleware for Express              |
+| Middleware Core     | `src/middleware/core.ts`      | Shared payment processing logic             |
 
 ### Data Flow
 
@@ -160,6 +172,33 @@ bun dev
 curl http://localhost:8090/supported
 ```
 
+### Multi-Chain Paid Endpoint (EVM + Solana + Starknet)
+
+This repo includes a single endpoint example that accepts EVM, Solana, and
+Starknet payments in one `accepts` array.
+
+Start the facilitator with Starknet enabled:
+
+```bash
+STARKNET_NETWORKS=starknet-mainnet,starknet-sepolia \
+STARKNET_SPONSOR_ADDRESS=0x... \
+STARKNET_PAYMASTER_ENDPOINT_STARKNET_MAINNET=https://starknet.paymaster.avnu.fi \
+STARKNET_PAYMASTER_ENDPOINT_STARKNET_SEPOLIA=https://starknet.paymaster.avnu.fi \
+STARKNET_PAYMASTER_API_KEY=your-avnu-api-key \
+bun dev
+```
+
+Run the API example:
+
+```bash
+EVM_PRIVATE_KEY=... \
+SVM_PRIVATE_KEY=... \
+STARKNET_PAY_TO=0x... \
+bun run examples/paidApiAll.ts
+```
+
+See `examples/paidApiAll.ts` for the full route config.
+
 ## Configuration
 
 ### Environment Variables
@@ -182,6 +221,18 @@ curl http://localhost:8090/supported
 
 \*Required when CDP credentials are not configured.
 
+**Starknet Paymaster (Exact Scheme)**
+
+| Variable                           | Required | Default | Description                                      |
+| ---------------------------------- | -------- | ------- | ------------------------------------------------ |
+| `STARKNET_PAYMASTER_API_KEY`       | No       | -       | Paymaster API key (AVNU hosted paymaster)        |
+| `STARKNET_SPONSOR_ADDRESS`         | Yes\*    | -       | Sponsor account address for /supported signers   |
+| `STARKNET_PAYMASTER_ENDPOINT_*`    | No       | -       | Per-network paymaster endpoint override          |
+| `STARKNET_PAYMASTER_API_KEY_*`     | No       | -       | Per-network paymaster API key override           |
+| `STARKNET_SPONSOR_ADDRESS_*`       | No       | -       | Per-network sponsor address override             |
+
+\*Required when enabling Starknet networks.
+
 **Server Configuration**
 
 | Variable | Required | Default | Description |
@@ -197,6 +248,7 @@ The facilitator uses a simplified network configuration system. Instead of manua
 | Variable       | Default                 | Description                    |
 | -------------- | ----------------------- | ------------------------------ |
 | `EVM_NETWORKS` | `base,base-sepolia`     | Comma-separated EVM networks   |
+| `STARKNET_NETWORKS` | `(empty)`          | Comma-separated Starknet networks (opt-in) |
 | `SVM_NETWORKS` | `solana-devnet`         | Comma-separated Solana networks |
 
 **Supported EVM Networks**
@@ -218,6 +270,13 @@ The facilitator uses a simplified network configuration system. Instead of manua
 | `abstract`         | `eip155:2741`     | 2741     |
 | `abstract-testnet` | `eip155:11124`    | 11124    |
 
+**Supported Starknet Networks**
+
+| Name               | CAIP-2             |
+| ------------------ | ------------------ |
+| `starknet-mainnet` | `starknet:SN_MAIN` |
+| `starknet-sepolia` | `starknet:SN_SEPOLIA` |
+
 **Supported SVM Networks**
 
 | Name              | CAIP-2                                    |
@@ -234,7 +293,7 @@ RPC URLs are automatically resolved based on available API keys. Set a single AP
 
 | Variable          | Provider | Description                                       |
 | ----------------- | -------- | ------------------------------------------------- |
-| `ALCHEMY_API_KEY` | Alchemy  | EVM RPC provider ([alchemy.com](https://alchemy.com)) |
+| `ALCHEMY_API_KEY` | Alchemy  | EVM + Starknet RPC provider ([alchemy.com](https://alchemy.com)) |
 | `INFURA_API_KEY`  | Infura   | EVM RPC provider ([infura.io](https://infura.io))     |
 | `HELIUS_API_KEY`  | Helius   | Solana RPC provider ([helius.dev](https://helius.dev)) |
 
@@ -244,6 +303,12 @@ RPC URLs are automatically resolved based on available API keys. Set a single AP
 2. Alchemy (if `ALCHEMY_API_KEY` is set)
 3. Infura (if `INFURA_API_KEY` is set)
 4. Public RPC fallback
+
+**RPC Resolution Priority (Starknet)**
+
+1. Explicit override: `STARKNET_RPC_URL_<NETWORK>` (e.g., `STARKNET_RPC_URL_STARKNET_MAINNET`)
+2. Alchemy (if `ALCHEMY_API_KEY` is set)
+3. Public RPC fallback
 
 **RPC Resolution Priority (SVM)**
 
@@ -259,6 +324,10 @@ Override specific networks when needed (hyphens become underscores in env var na
 # EVM overrides
 EVM_RPC_URL_BASE=https://custom-base-rpc.example.com
 EVM_RPC_URL_BASE_SEPOLIA=https://custom-sepolia-rpc.example.com
+
+# Starknet overrides
+STARKNET_RPC_URL_STARKNET_MAINNET=https://custom-starknet-mainnet.example.com
+STARKNET_RPC_URL_STARKNET_SEPOLIA=https://custom-starknet-sepolia.example.com
 
 # SVM overrides
 SVM_RPC_URL_SOLANA_MAINNET=https://custom-solana-rpc.example.com
@@ -290,6 +359,15 @@ SVM_NETWORKS=solana-mainnet,solana-devnet
 ALCHEMY_API_KEY=your-alchemy-key
 HELIUS_API_KEY=your-helius-key
 SVM_PRIVATE_KEY=your-solana-private-key
+```
+
+**Starknet (Opt-in)**
+
+```bash
+STARKNET_NETWORKS=starknet-mainnet,starknet-sepolia
+ALCHEMY_API_KEY=your-alchemy-key
+STARKNET_SPONSOR_ADDRESS=0xyour-sponsor-address
+STARKNET_PAYMASTER_API_KEY=your-paymaster-key
 ```
 
 ### OpenTelemetry (Optional)
@@ -496,6 +574,21 @@ Immediate, single-transaction settlement. Each payment request results in one on
 - USDC on Base (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`)
 - SPL tokens on Solana
 
+#### Exact Scheme (Starknet Paymaster)
+
+Starknet exact payments are gasless for users because a **paymaster** sponsors gas. The user still signs the transaction data.
+
+**Flow:**
+
+1. Client receives `PaymentRequired` (402 response).
+2. Client calls the paymaster `paymaster_buildTransaction` to get SNIP-12 `typed_data`.
+3. Client signs `typed_data` with their **own** Starknet account signer (private key or wallet).
+4. Client sends `PaymentPayload` **including `typedData`** to the resource server/facilitator.
+5. Facilitator verifies the payload and calls `paymaster_executeTransaction` to submit the tx.
+6. Paymaster pays gas from its sponsor account and broadcasts to Starknet.
+
+**Important:** The paymaster never signs for the user. If the client cannot sign, the payment cannot be created. The facilitator **rejects Starknet payloads without `typedData`**. `STARKNET_SPONSOR_ADDRESS` identifies the paymaster sponsor account for `/supported`.
+
 ### Upto Scheme (Batched Payments)
 
 Permit-based flow for efficient EVM token payments:
@@ -529,6 +622,54 @@ Permit-based flow for efficient EVM token payments:
 - ERC-2612 Permit tokens only
 - In-memory sessions (lost on restart without custom store)
 
+## Unified Client
+
+The unified client wraps x402 client + HTTP helpers into a single
+`fetchWithPayment` function. It handles 402 responses by creating a payment
+payload and retrying the request with the `PAYMENT-SIGNATURE` header.
+
+```typescript
+import { createUnifiedClient } from "@daydreamsai/facilitator/client";
+import { createPublicClient, http } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { base } from "viem/chains";
+
+const account = privateKeyToAccount(
+  process.env.CLIENT_EVM_PRIVATE_KEY as `0x${string}`
+);
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http(process.env.RPC_URL),
+});
+
+const { fetchWithPayment, uptoScheme } = createUnifiedClient({
+  evmExact: { signer: account },
+  evmUpto: {
+    signer: account,
+    publicClient,
+    facilitatorUrl: process.env.FACILITATOR_URL,
+    // Optional: skip /supported lookup by setting a local signer map
+    // facilitatorSignerByNetwork: { "eip155:8453": "0x..." },
+  },
+});
+
+const response = await fetchWithPayment("https://api.example.com/premium");
+```
+
+### Upto Scheme Behavior
+
+- ERC-2612 permits are cached per `(network, asset, owner, facilitator signer)`
+  and reused until close to expiry.
+- If a paid request still returns 402 with `cap_exhausted` or `session_closed`,
+  the unified client invalidates the cached permit and retries once.
+- You can force a new permit with
+  `uptoScheme?.invalidatePermit("eip155:8453", "0x...")`.
+
+### Starknet Note
+
+Starknet exact requires `typedData` in the payment payload. The unified client
+throws if `typedData` is missing.
+
 ## Upto Module
 
 The upto module provides components for batched payment tracking on resource servers.
@@ -560,10 +701,12 @@ const upto = createUptoModule({
   facilitatorClient,
   // Optional: custom session store (defaults to InMemoryUptoSessionStore)
   // store: new RedisSessionStore(),
+  // Optional: sweeper configuration for auto settlement
+  // sweeperConfig: { intervalMs: 30_000, idleSettleMs: 120_000 },
 });
 
 // Use the sweeper plugin for automatic settlement
-app.use(upto.sweeper);
+app.use(upto.createSweeper());
 ```
 
 ### Tracking Payments
@@ -629,6 +772,231 @@ resourceServer.onAfterVerify(async (ctx) => {
   }
 });
 ```
+
+## Framework Middleware
+
+Pre-built payment middleware for popular web frameworks. Each middleware handles:
+
+- Payment verification via the facilitator
+- Automatic settlement after successful requests
+- Paywall HTML for browser-based payments
+- Upto session tracking (optional)
+
+### Elysia
+
+```typescript
+import { Elysia } from "elysia";
+import { node } from "@elysiajs/node";
+import { HTTPFacilitatorClient } from "@x402/core/http";
+import { createPaywall, evmPaywall, svmPaywall } from "@x402/paywall";
+
+import { createElysiaPaidRoutes } from "@daydreamsai/facilitator/elysia";
+import { createResourceServer } from "@daydreamsai/facilitator/server";
+import { createUptoModule } from "@daydreamsai/facilitator/upto";
+
+const facilitatorClient = new HTTPFacilitatorClient({ url: "http://localhost:8090" });
+const resourceServer = createResourceServer(facilitatorClient);
+const upto = createUptoModule({ facilitatorClient, autoSweeper: true });
+const paywallProvider = createPaywall()
+  .withNetwork(evmPaywall)
+  .withNetwork(svmPaywall)
+  .build();
+
+const app = new Elysia({ prefix: "/api", adapter: node() });
+
+createElysiaPaidRoutes(app, {
+  basePath: "/api",
+  middleware: {
+    resourceServer,
+    upto,
+    paywallProvider,
+    paywallConfig: { appName: "My Paid API", testnet: true },
+  },
+})
+  .get("/premium", () => ({ message: "premium content" }), {
+    payment: {
+      accepts: {
+        scheme: "exact",
+        network: "eip155:8453",
+        payTo: "0x...",
+        price: "$0.01",
+      },
+      description: "Premium content",
+      mimeType: "application/json",
+    },
+  });
+
+app.listen(4022);
+```
+
+### Hono
+
+```typescript
+import { Hono } from "hono";
+import { HTTPFacilitatorClient } from "@x402/core/http";
+import { createPaywall, evmPaywall, svmPaywall } from "@x402/paywall";
+
+import { createHonoPaidRoutes } from "@daydreamsai/facilitator/hono";
+import { createResourceServer } from "@daydreamsai/facilitator/server";
+import { createUptoModule } from "@daydreamsai/facilitator/upto";
+
+const facilitatorClient = new HTTPFacilitatorClient({ url: "http://localhost:8090" });
+const resourceServer = createResourceServer(facilitatorClient);
+const upto = createUptoModule({ facilitatorClient, autoSweeper: true });
+const paywallProvider = createPaywall()
+  .withNetwork(evmPaywall)
+  .withNetwork(svmPaywall)
+  .build();
+
+const app = new Hono().basePath("/api");
+
+createHonoPaidRoutes(app, {
+  basePath: "/api",
+  middleware: {
+    resourceServer,
+    upto,
+    paywallProvider,
+    paywallConfig: { appName: "My Paid API", testnet: true },
+  },
+})
+  .get("/premium", (c) => c.json({ message: "premium content" }), {
+    payment: {
+      accepts: {
+        scheme: "exact",
+        network: "eip155:8453",
+        payTo: "0x...",
+        price: "$0.01",
+      },
+      description: "Premium content",
+      mimeType: "application/json",
+    },
+  });
+
+export default { port: 4023, fetch: app.fetch };
+```
+
+### Express
+
+```typescript
+import express from "express";
+import { HTTPFacilitatorClient } from "@x402/core/http";
+import { createPaywall, evmPaywall, svmPaywall } from "@x402/paywall";
+
+import { createExpressPaidRoutes } from "@daydreamsai/facilitator/express";
+import { createResourceServer } from "@daydreamsai/facilitator/server";
+import { createUptoModule } from "@daydreamsai/facilitator/upto";
+
+const facilitatorClient = new HTTPFacilitatorClient({ url: "http://localhost:8090" });
+const resourceServer = createResourceServer(facilitatorClient);
+const upto = createUptoModule({ facilitatorClient, autoSweeper: true });
+const paywallProvider = createPaywall()
+  .withNetwork(evmPaywall)
+  .withNetwork(svmPaywall)
+  .build();
+
+const app = express();
+app.use(express.json());
+
+createExpressPaidRoutes(app, {
+  basePath: "/api",
+  middleware: {
+    resourceServer,
+    upto,
+    paywallProvider,
+    paywallConfig: { appName: "My Paid API", testnet: true },
+  },
+})
+  .get("/api/premium", (_req, res) => res.json({ message: "premium content" }), {
+    payment: {
+      accepts: {
+        scheme: "exact",
+        network: "eip155:8453",
+        payTo: "0x...",
+        price: "$0.01",
+      },
+      description: "Premium content",
+      mimeType: "application/json",
+    },
+  });
+
+app.listen(4024);
+```
+
+### Middleware Configuration
+
+| Option | Type | Description |
+| ------ | ---- | ----------- |
+| `resourceServer` | `x402ResourceServer` | Pre-configured resource server instance |
+| `upto` | `UptoModule` | Optional upto module for batched payments |
+| `paywallProvider` | `PaywallProvider` | Optional paywall HTML generator |
+| `paywallConfig` | `PaywallConfig` | Paywall display options |
+| `autoSettle` | `boolean` | Auto-settle after successful requests (default: `true`) |
+| `paymentHeaderAliases` | `string[]` | Alternative header names for payment data |
+
+### Payment Route Options
+
+Each route can specify payment requirements:
+
+```typescript
+{
+  payment: {
+    accepts: {
+      scheme: "exact" | "upto",
+      network: "eip155:8453",           // CAIP-2 network ID
+      payTo: "0x...",                   // Recipient address
+      price: "$0.01" | {                // Price shorthand or detailed
+        amount: "10000",
+        asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        extra: { name: "USD Coin", version: "2" }
+      }
+    },
+    description: "What this endpoint provides",
+    mimeType: "application/json"
+  }
+}
+```
+
+### Paywall Support
+
+When a browser (Accept: text/html) requests a paid endpoint without payment, the middleware returns an interactive paywall page instead of a JSON error.
+
+**Setup:**
+
+1. Install the paywall package:
+   ```bash
+   bun add @x402/paywall
+   ```
+
+2. Create and configure the provider:
+   ```typescript
+   import { createPaywall, evmPaywall, svmPaywall } from "@x402/paywall";
+
+   const paywallProvider = createPaywall()
+     .withNetwork(evmPaywall)   // EVM chains
+     .withNetwork(svmPaywall)   // Solana
+     .build();
+   ```
+
+3. Pass to middleware config:
+   ```typescript
+   createElysiaPaidRoutes(app, {
+     middleware: {
+       resourceServer,
+       paywallProvider,
+       paywallConfig: {
+         appName: "My App",
+         testnet: true,  // Show testnet warning
+       },
+     },
+   });
+   ```
+
+**Paywall Config Options:**
+
+| Option | Type | Description |
+| ------ | ---- | ----------- |
+| `appName` | `string` | Application name shown in paywall |
+| `testnet` | `boolean` | Display testnet warning banner |
 
 ## Testing
 

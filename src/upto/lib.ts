@@ -13,8 +13,11 @@
  * } from "@daydreamsai/facilitator/upto";
  *
  * // Create module with default in-memory store
- * const upto = createUptoModule({ facilitatorClient });
- * app.use(upto.sweeper);
+ * const upto = createUptoModule({
+ *   facilitatorClient,
+ *   sweeperConfig: { intervalMs: 30_000 },
+ * });
+ * app.use(upto.createSweeper());
  *
  * // Track payments
  * const result = trackUptoPayment(upto.store, paymentPayload, requirements);

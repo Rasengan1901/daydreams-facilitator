@@ -13,6 +13,8 @@ import { ExactEvmSchemeV1 } from "@x402/evm/exact/v1/facilitator";
 import { NETWORKS as V1_NETWORKS } from "@x402/evm/v1";
 import { registerExactSvmScheme } from "@x402/svm/exact/facilitator";
 
+import { ExactStarknetScheme } from "./starknet/exact/facilitator.js";
+import type { StarknetConfig } from "./starknet/exact/facilitator.js";
 import { registerUptoEvmScheme } from "./upto/evm/register.js";
 
 // ============================================================================
@@ -21,6 +23,7 @@ import { registerUptoEvmScheme } from "./upto/evm/register.js";
 
 export type EvmSchemeType = "exact" | "upto";
 export type SvmSchemeType = "exact";
+export type { StarknetConfig };
 
 /** CAIP-2 network identifier (e.g., "eip155:8453", "solana:...") */
 export type NetworkId = `${string}:${string}`;
@@ -70,6 +73,8 @@ export interface FacilitatorConfig {
   evmSigners?: EvmSignerConfig[];
   /** SVM signer configurations */
   svmSigners?: SvmSignerConfig[];
+  /** Starknet configurations */
+  starknetConfigs?: StarknetConfig[];
   /** Lifecycle hooks for custom logic */
   hooks?: FacilitatorHooks;
 }
@@ -177,6 +182,14 @@ export function createFacilitator(config: FacilitatorConfig): x402Facilitator {
         networks: svmConfig.networks,
       });
     }
+  }
+
+  // Register Starknet schemes
+  for (const starknetConfig of config.starknetConfigs ?? []) {
+    facilitator.register(
+      starknetConfig.network,
+      new ExactStarknetScheme(starknetConfig)
+    );
   }
 
   return facilitator;
