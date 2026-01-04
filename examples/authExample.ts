@@ -28,7 +28,7 @@ async function setupTokens() {
       requestsPerMinute: 10,
       requestsPerDay: 100,
     },
-    "test",
+    "test"
   );
 
   // Pro tier token
@@ -44,17 +44,21 @@ async function setupTokens() {
         plan: "professional",
       },
     },
-    "live",
+    "live"
   );
 
   console.log("🔑 Test Tokens Created:");
   console.log("\nFree Tier:");
   console.log(`  Token: ${freeToken.token}`);
-  console.log(`  Rate Limits: ${freeToken.requestsPerMinute}/min, ${freeToken.requestsPerDay}/day`);
+  console.log(
+    `  Rate Limits: ${freeToken.requestsPerMinute}/min, ${freeToken.requestsPerDay}/day`
+  );
 
   console.log("\nPro Tier:");
   console.log(`  Token: ${proToken.token}`);
-  console.log(`  Rate Limits: ${proToken.requestsPerMinute}/min, ${proToken.requestsPerDay}/day`);
+  console.log(
+    `  Rate Limits: ${proToken.requestsPerMinute}/min, ${proToken.requestsPerDay}/day`
+  );
   console.log(`  User ID: ${proToken.userId}`);
   console.log("");
 
@@ -69,7 +73,7 @@ const app = new Elysia()
       storage,
       rateLimiter,
       tracker,
-    }),
+    })
   )
   .get("/", () => ({
     message: "Bearer Token Authentication Example",
@@ -121,22 +125,32 @@ console.log(`🚀 Server running at http://localhost:${app.server?.port}`);
 setupTokens().then(({ freeToken, proToken }) => {
   console.log("📖 Usage Examples:");
   console.log("\n1. Access protected endpoint (Free tier):");
-  console.log(`   curl -H "Authorization: Bearer ${freeToken.token}" http://localhost:3001/protected`);
+  console.log(
+    `   curl -H "Authorization: Bearer ${freeToken.token}" http://localhost:3001/protected`
+  );
 
   console.log("\n2. Get user info (Pro tier):");
-  console.log(`   curl -H "Authorization: Bearer ${proToken.token}" http://localhost:3001/user`);
+  console.log(
+    `   curl -H "Authorization: Bearer ${proToken.token}" http://localhost:3001/user`
+  );
 
   console.log("\n3. Access admin (Pro tier - allowed):");
-  console.log(`   curl -H "Authorization: Bearer ${proToken.token}" http://localhost:3001/admin`);
+  console.log(
+    `   curl -H "Authorization: Bearer ${proToken.token}" http://localhost:3001/admin`
+  );
 
   console.log("\n4. Access admin (Free tier - denied):");
-  console.log(`   curl -H "Authorization: Bearer ${freeToken.token}" http://localhost:3001/admin`);
+  console.log(
+    `   curl -H "Authorization: Bearer ${freeToken.token}" http://localhost:3001/admin`
+  );
 
   console.log("\n5. No token (401):");
   console.log(`   curl http://localhost:3001/protected`);
 
   console.log("\n6. Invalid token (401):");
-  console.log(`   curl -H "Authorization: Bearer fac_test_invalidtoken123456789abc" http://localhost:3001/protected`);
+  console.log(
+    `   curl -H "Authorization: Bearer fac_test_invalidtoken123456789abc" http://localhost:3001/protected`
+  );
 
   console.log("\n");
 });
