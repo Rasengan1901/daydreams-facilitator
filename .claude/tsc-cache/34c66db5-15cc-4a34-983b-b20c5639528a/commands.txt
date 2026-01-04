@@ -1,2 +1,2 @@
-packages/core:build:cd /Users/os/Documents/code/dreams/facil/packages/core && npm run build
-packages/core:tsc:cd /Users/os/Documents/code/dreams/facil/packages/core && npx tsc --noEmit
+examples/facilitator-server:build:cd /Users/os/Documents/code/dreams/facil/examples/facilitator-server && npm run build
+examples/facilitator-server:tsc:cd /Users/os/Documents/code/dreams/facil/examples/facilitator-server && npx tsc --noEmit
