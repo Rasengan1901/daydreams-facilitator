@@ -178,13 +178,4 @@ async function createDefaultSigners(): Promise<{
 // Default Instance
 // ============================================================================
 
-const defaultSigners = await createDefaultSigners();
-
-/**
- * Default facilitator instance using environment-configured signers.
- * Uses CDP signer if CDP credentials are provided, otherwise falls back to private keys.
- * For custom signers, use createFacilitator() instead.
- */
-export const facilitator = createFacilitator({
-  ...defaultSigners,
-});
+export const defaultSigners = await createDefaultSigners();
