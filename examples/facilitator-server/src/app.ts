@@ -12,8 +12,12 @@ import type {
 } from "@x402/core/types";
 
 import { logger } from "@bogeychan/elysia-logger";
+import { defaultSigners } from "./setup";
+import { createFacilitator } from "@daydreamsai/facilitator";
 
-import { facilitator } from "./setup.js";
+const facilitator = createFacilitator({
+  ...defaultSigners,
+});
 
 // Elysia app (Node adapter for Node.js runtime)
 export const app = new Elysia({ adapter: node() })
