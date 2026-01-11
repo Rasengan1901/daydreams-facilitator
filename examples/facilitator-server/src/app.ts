@@ -233,3 +233,10 @@ export async function createApp() {
 // For backwards compatibility, create and export the app
 // Note: This uses top-level await
 export const app = await createApp();
+
+// Start the server
+const port = Number(process.env.PORT ?? 8090);
+
+app.listen(port);
+
+console.log(`🚀 Facilitator listening on port ${port}`);
