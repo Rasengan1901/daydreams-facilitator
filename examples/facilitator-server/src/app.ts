@@ -143,23 +143,13 @@ export async function createApp() {
 
     /**
      * GET /health
-     * Health check endpoint for load balancers and monitoring
+     * Health check endpoint - confirms facilitator is running
      */
     .get("/health", () => {
-      // Check Redis connection status
-      let redisStatus: "connected" | "disconnected" | "not_configured" = "not_configured";
-      if (sessionStore instanceof RedisSessionStore) {
-        redisStatus = sessionStore.isConnected ? "connected" : "disconnected";
-      }
-
       return {
-        status: "healthy",
+        status: "ok",
         timestamp: Date.now(),
         uptime: Math.floor((Date.now() - startTime) / 1000),
-        version: VERSION,
-        services: {
-          redis: redisStatus,
-        },
       };
     })
 
