@@ -154,7 +154,8 @@ export function createFacilitator(config: FacilitatorConfig): x402Facilitator {
 
         if (supportedV1Names.length > 0) {
           // V1 uses network names (e.g., "base") not CAIP IDs
-          facilitator.register(
+          // IMPORTANT: Use registerV1() not register() for v1 schemes
+          facilitator.registerV1(
             supportedV1Names as NetworkId[],
             new ExactEvmSchemeV1(evmConfig.signer, {
               deployERC4337WithEIP6492: evmConfig.deployERC4337WithEIP6492,
