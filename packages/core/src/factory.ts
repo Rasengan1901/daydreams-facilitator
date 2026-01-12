@@ -147,17 +147,12 @@ export function createFacilitator(config: FacilitatorConfig): x402Facilitator {
           ? evmConfig.v1NetworkNames
           : [evmConfig.v1NetworkNames];
 
-        console.log(`[Factory] V1 registration: v1Names=${JSON.stringify(v1Names)}, V1_NETWORKS=${JSON.stringify(V1_NETWORKS)}`);
-
         // Filter to only networks that @x402/evm supports for v1
         const supportedV1Names = v1Names.filter((name) =>
           V1_NETWORKS.includes(name)
         );
 
-        console.log(`[Factory] Supported V1 names after filter: ${JSON.stringify(supportedV1Names)}`);
-
         if (supportedV1Names.length > 0) {
-          console.log(`[Factory] Registering ExactEvmSchemeV1 for networks: ${JSON.stringify(supportedV1Names)}`);
           // V1 uses network names (e.g., "base") not CAIP IDs
           facilitator.register(
             supportedV1Names as NetworkId[],
@@ -165,11 +160,7 @@ export function createFacilitator(config: FacilitatorConfig): x402Facilitator {
               deployERC4337WithEIP6492: evmConfig.deployERC4337WithEIP6492,
             })
           );
-        } else {
-          console.log(`[Factory] No supported V1 networks found`);
         }
-      } else {
-        console.log(`[Factory] V1 registration skipped: registerV1=${registerV1}, v1NetworkNames=${evmConfig.v1NetworkNames}`);
       }
     }
 

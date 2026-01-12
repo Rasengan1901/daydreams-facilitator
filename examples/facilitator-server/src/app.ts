@@ -21,10 +21,6 @@ import {
 } from "@daydreamsai/facilitator/upto";
 import { RedisSessionStore } from "./upto/redisStore";
 
-// V1 scheme support
-import { ExactEvmSchemeV1 } from "@x402/evm/exact/v1/facilitator";
-import { NETWORKS as V1_NETWORKS } from "@x402/evm/v1";
-
 // ============================================================================
 // Constants
 // ============================================================================
@@ -97,36 +93,10 @@ export async function createApp() {
   // Initialize session store (Redis if available, otherwise in-memory)
   const sessionStore = await createSessionStore();
 
-  // Create the facilitator
+  // Create the facilitator (v1 scheme registration is handled by the factory)
   const facilitator = createFacilitator({
     ...defaultSigners,
   });
-
-  // Manually register V1 scheme for backwards compatibility with Coinbase MCP
-  // The published @daydreamsai/facilitator may not have v1 registration
-  for (const evmSigner of defaultSigners.evmSigners ?? []) {
-    // Get the network name from the CAIP ID (e.g., "eip155:8453" -> need to map)
-    const networks = Array.isArray(evmSigner.networks) ? evmSigner.networks : [evmSigner.networks];
-    
-    // Map CAIP IDs to network names for v1 registration
-    // V1 uses network names like "base", not CAIP IDs
-    const v1NetworkName = evmSigner.v1NetworkNames;
-    
-    if (v1NetworkName && evmSigner.registerV1) {
-      const v1Names = Array.isArray(v1NetworkName) ? v1NetworkName : [v1NetworkName];
-      const supportedV1Names = v1Names.filter((name: string) => V1_NETWORKS.includes(name));
-      
-      if (supportedV1Names.length > 0) {
-        console.log(`[App] Registering V1 scheme for networks: ${JSON.stringify(supportedV1Names)}`);
-        facilitator.register(
-          supportedV1Names as `${string}:${string}`[],
-          new ExactEvmSchemeV1(evmSigner.signer, {
-            deployERC4337WithEIP6492: evmSigner.deployERC4337WithEIP6492,
-          })
-        );
-      }
-    }
-  }
 
   // Create the upto module with the session store
   const upto = createUptoModule({

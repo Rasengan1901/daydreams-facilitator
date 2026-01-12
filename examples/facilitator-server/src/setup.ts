@@ -30,7 +30,6 @@ import {
   SVM_PRIVATE_KEY,
   CDP_ACCOUNT_NAME,
 } from "@daydreamsai/facilitator/config";
-import { NETWORKS as V1_NETWORKS } from "@x402/evm/v1";
 
 type EvmSignerConfig = FacilitatorConfig["evmSigners"] extends
   | (infer T)[]
@@ -58,13 +57,7 @@ async function createDefaultSigners(): Promise<{
   svmSigners: SvmSignerConfig[];
   starknetConfigs: StarknetConfig[];
 }> {
-  // Debug: Log V1 networks from @x402/evm
-  console.log("=== V1 Networks Debug ===");
-  console.log("V1_NETWORKS from @x402/evm:", V1_NETWORKS);
-  
   const networkSetups = getNetworkSetups();
-  console.log("Network setups:", networkSetups.map(n => ({ name: n.name, supportsV1: n.supportsV1 })));
-  console.log("=== End V1 Debug ===");
   const starknetNetworkSetups = getStarknetNetworkSetups();
 
   const starknetConfigs: StarknetConfig[] = [];
@@ -110,7 +103,6 @@ async function createDefaultSigners(): Promise<{
         rpcUrl: network.rpcUrl,
       });
 
-      console.log(`[CDP] Registering ${network.name}: supportsV1=${network.supportsV1}, v1NetworkNames=${network.supportsV1 ? network.name : undefined}`);
       evmSigners.push({
         signer,
         networks: network.caip as NetworkId,
