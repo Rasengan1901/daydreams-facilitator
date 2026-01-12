@@ -233,8 +233,15 @@ export async function createApp() {
           });
         }
 
+        // Default x402Version to 2 if not provided (for compatibility with clients
+        // that don't send the version, like Coinbase's MCP)
+        const normalizedPayload: PaymentPayload = {
+          ...paymentPayload,
+          x402Version: paymentPayload.x402Version ?? 2,
+        };
+
         const response: VerifyResponse = await facilitator.verify(
-          paymentPayload,
+          normalizedPayload,
           paymentRequirements
         );
 
@@ -274,8 +281,15 @@ export async function createApp() {
           });
         }
 
+        // Default x402Version to 2 if not provided (for compatibility with clients
+        // that don't send the version, like Coinbase's MCP)
+        const normalizedPayload: PaymentPayload = {
+          ...paymentPayload,
+          x402Version: paymentPayload.x402Version ?? 2,
+        };
+
         const response: SettleResponse = await facilitator.settle(
-          paymentPayload,
+          normalizedPayload,
           paymentRequirements
         );
 
