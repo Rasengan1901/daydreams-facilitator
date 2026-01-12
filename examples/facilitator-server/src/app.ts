@@ -222,43 +222,29 @@ export async function createApp() {
       }
 
       try {
-        const { paymentPayload, paymentRequirements } = body as {
-          paymentPayload?: PaymentPayload;
+        let { paymentPayload, paymentRequirements } = body as {
+          paymentPayload?: PaymentPayload | string;
           paymentRequirements?: PaymentRequirements;
         };
 
         // Debug logging for payment payload
         console.log("=== X-Payment Debug ===");
         console.log("paymentPayload type:", typeof paymentPayload);
-        console.log("paymentPayload:", JSON.stringify(paymentPayload, null, 2));
         console.log("paymentRequirements:", JSON.stringify(paymentRequirements, null, 2));
         
-        // If paymentPayload is a string (base64), try to decode it
+        // If paymentPayload is a string (base64), decode it
         if (typeof paymentPayload === "string") {
           try {
             const decoded = Buffer.from(paymentPayload, "base64").toString("utf-8");
             console.log("Raw decoded (base64):", decoded);
-            const parsed = JSON.parse(decoded);
-            console.log("Parsed structure:", JSON.stringify(parsed, null, 2));
+            paymentPayload = JSON.parse(decoded) as PaymentPayload;
+            console.log("Parsed structure:", JSON.stringify(paymentPayload, null, 2));
           } catch (e) {
             console.log("Failed to decode X-Payment as base64:", e);
-          }
-        }
-        
-        // Also check if there's a nested payload that's base64 encoded
-        if (paymentPayload && typeof paymentPayload === "object" && "payload" in paymentPayload) {
-          const innerPayload = (paymentPayload as Record<string, unknown>).payload;
-          if (typeof innerPayload === "string") {
-            try {
-              const decoded = Buffer.from(innerPayload, "base64").toString("utf-8");
-              console.log("Inner payload decoded (base64):", decoded);
-              const parsed = JSON.parse(decoded);
-              console.log("Inner parsed structure:", JSON.stringify(parsed, null, 2));
-            } catch (e) {
-              console.log("Failed to decode inner payload as base64:", e);
-            }
-          } else {
-            console.log("Inner payload (not string):", JSON.stringify(innerPayload, null, 2));
+            return status(400, {
+              error: "Invalid paymentPayload",
+              message: "Failed to decode base64 payment payload",
+            });
           }
         }
         console.log("=== End Debug ===");
@@ -269,12 +255,8 @@ export async function createApp() {
           });
         }
 
-        // Default x402Version to 2 if not provided (for compatibility with clients
-        // that don't send the version, like Coinbase's MCP)
-        const normalizedPayload: PaymentPayload = {
-          ...paymentPayload,
-          x402Version: paymentPayload.x402Version ?? 2,
-        };
+        // Ensure paymentPayload is now an object
+        const normalizedPayload: PaymentPayload = paymentPayload as PaymentPayload;
 
         const response: VerifyResponse = await facilitator.verify(
           normalizedPayload,
@@ -306,10 +288,25 @@ export async function createApp() {
       }
 
       try {
-        const { paymentPayload, paymentRequirements } = body as {
-          paymentPayload?: PaymentPayload;
+        let { paymentPayload, paymentRequirements } = body as {
+          paymentPayload?: PaymentPayload | string;
           paymentRequirements?: PaymentRequirements;
         };
+
+        // If paymentPayload is a string (base64), decode it
+        if (typeof paymentPayload === "string") {
+          try {
+            const decoded = Buffer.from(paymentPayload, "base64").toString("utf-8");
+            console.log("[Settle] Decoded base64 payload:", decoded);
+            paymentPayload = JSON.parse(decoded) as PaymentPayload;
+          } catch (e) {
+            console.log("[Settle] Failed to decode X-Payment as base64:", e);
+            return status(400, {
+              error: "Invalid paymentPayload",
+              message: "Failed to decode base64 payment payload",
+            });
+          }
+        }
 
         if (!paymentPayload || !paymentRequirements) {
           return status(400, {
@@ -317,12 +314,8 @@ export async function createApp() {
           });
         }
 
-        // Default x402Version to 2 if not provided (for compatibility with clients
-        // that don't send the version, like Coinbase's MCP)
-        const normalizedPayload: PaymentPayload = {
-          ...paymentPayload,
-          x402Version: paymentPayload.x402Version ?? 2,
-        };
+        // Ensure paymentPayload is now an object
+        const normalizedPayload: PaymentPayload = paymentPayload as PaymentPayload;
 
         const response: SettleResponse = await facilitator.settle(
           normalizedPayload,
