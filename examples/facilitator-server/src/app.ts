@@ -43,6 +43,226 @@ setInterval(() => {
 }, 5 * 60 * 1000); // Every 5 minutes
 
 // ============================================================================
+// Network Normalization
+// ============================================================================
+
+/**
+ * Map short network names to CAIP-2 format for facilitator compatibility.
+ * The facilitator expects CAIP-2 format (eip155:8453), but MCPs may send
+ * short names (base).
+ */
+function normalizeNetwork(network: string): string {
+  const networkMap: Record<string, string> = {
+    base: "eip155:8453",
+    "base-sepolia": "eip155:84532",
+    ethereum: "eip155:1",
+    sepolia: "eip155:11155111",
+    optimism: "eip155:10",
+    "optimism-sepolia": "eip155:11155420",
+    arbitrum: "eip155:42161",
+    "arbitrum-sepolia": "eip155:421614",
+    polygon: "eip155:137",
+    "polygon-amoy": "eip155:80002",
+    avalanche: "eip155:43114",
+    "avalanche-fuji": "eip155:43113",
+    abstract: "eip155:2741",
+    "abstract-testnet": "eip155:11124",
+  };
+
+  return networkMap[network.toLowerCase()] || network;
+}
+
+// ============================================================================
+// Payment Payload Preprocessing
+// ============================================================================
+
+interface PreprocessedVerifyInput {
+  payload: PaymentPayload;
+  requirements: PaymentRequirements;
+  error?: {
+    status: number;
+    error: string;
+    message: string;
+  };
+}
+
+/**
+ * Preprocess payment payload and requirements for verification.
+ *
+ * Handles:
+ * 1. Network normalization (base → eip155:8453)
+ * 2. Payload structure normalization (ensures accepted property exists)
+ * 3. Authorization guardrails (validates authorization matches requirements)
+ * 4. Domain detection logging (logs payload shape for domain inference)
+ *
+ * Returns either normalized input or an error response.
+ */
+function preprocessVerifyInput(
+  paymentPayload: PaymentPayload | string,
+  paymentRequirements: PaymentRequirements
+): PreprocessedVerifyInput {
+  // Step 1: Decode base64 if needed
+  let payload: PaymentPayload;
+  if (typeof paymentPayload === "string") {
+    try {
+      const decoded = Buffer.from(paymentPayload, "base64").toString("utf-8");
+      payload = JSON.parse(decoded) as PaymentPayload;
+    } catch (e) {
+      return {
+        payload: {} as PaymentPayload,
+        requirements: paymentRequirements,
+        error: {
+          status: 400,
+          error: "Invalid paymentPayload",
+          message: "Failed to decode base64 payment payload",
+        },
+      };
+    }
+  } else {
+    payload = paymentPayload;
+  }
+
+  // Step 2: Normalize network in requirements
+  const normalizedNetwork = normalizeNetwork(paymentRequirements.network) as `eip155:${number}` | `solana:${string}` | `starknet:${string}`;
+  const normalizedRequirements: PaymentRequirements = {
+    ...paymentRequirements,
+    network: normalizedNetwork,
+  };
+
+  // Step 3: Normalize payload structure for x402Version 2
+  const x402Version = payload.x402Version ?? 2;
+
+  // Ensure payload has the correct structure: { x402Version, accepted, payload }
+  let normalizedPayload: PaymentPayload;
+
+  if (payload.accepted) {
+    // Already has accepted property, normalize network there too
+    const acceptedNetwork = payload.accepted.network 
+      ? normalizeNetwork(payload.accepted.network) as `eip155:${number}` | `solana:${string}` | `starknet:${string}`
+      : normalizedNetwork;
+    
+    normalizedPayload = {
+      ...payload,
+      x402Version,
+      accepted: {
+        ...payload.accepted,
+        network: acceptedNetwork,
+      },
+    };
+  } else {
+    // Missing accepted property - construct from requirements
+    // Also handle case where authorization might be at top level
+    const topLevelAuth = (payload as { authorization?: unknown }).authorization;
+    const existingPayload = payload.payload as Record<string, unknown> | undefined;
+
+    normalizedPayload = {
+      x402Version,
+      resource: payload.resource || "unknown",
+      accepted: normalizedRequirements,
+      payload: {
+        ...(existingPayload || {}),
+        // Move authorization from top level to payload if needed
+        ...(topLevelAuth && !existingPayload?.authorization
+          ? { authorization: topLevelAuth }
+          : {}),
+      } as PaymentPayload["payload"],
+    };
+  }
+
+  // Step 4: Guardrails - validate authorization matches requirements (if present)
+  const payloadData = normalizedPayload.payload as
+    | { authorization?: { from?: string; to?: string; value?: string } }
+    | undefined;
+
+  if (payloadData?.authorization) {
+    const auth = payloadData.authorization;
+
+    // Validate payTo matches authorization.to
+    if (auth.to && normalizedRequirements.payTo) {
+      if (auth.to.toLowerCase() !== normalizedRequirements.payTo.toLowerCase()) {
+        return {
+          payload: normalizedPayload,
+          requirements: normalizedRequirements,
+          error: {
+            status: 400,
+            error: "authorization_mismatch",
+            message: `Authorization 'to' (${auth.to}) does not match payment requirements 'payTo' (${normalizedRequirements.payTo})`,
+          },
+        };
+      }
+    }
+
+    // Validate amount/authorization.value
+    if (auth.value && normalizedRequirements.amount) {
+      const authValue = BigInt(auth.value);
+      const requiredAmount = BigInt(normalizedRequirements.amount);
+
+      if (authValue < requiredAmount) {
+        return {
+          payload: normalizedPayload,
+          requirements: normalizedRequirements,
+          error: {
+            status: 400,
+            error: "authorization_amount_insufficient",
+            message: `Authorization value (${auth.value}) is less than required amount (${normalizedRequirements.amount})`,
+          },
+        };
+      }
+    }
+  }
+
+  // Step 5: Log payload shape for domain detection (redacted)
+  const payloadShape = {
+    hasAccepted: !!normalizedPayload.accepted,
+    hasPayload: !!normalizedPayload.payload,
+    payloadKeys: normalizedPayload.payload
+      ? Object.keys(normalizedPayload.payload as Record<string, unknown>)
+      : [],
+    authorizationShape: payloadData?.authorization
+      ? {
+          hasFrom: !!payloadData.authorization.from,
+          hasTo: !!payloadData.authorization.to,
+          hasValue: !!payloadData.authorization.value,
+          hasValidAfter: !!(payloadData.authorization as { validAfter?: unknown })
+            .validAfter,
+          hasValidBefore: !!(payloadData.authorization as { validBefore?: unknown })
+            .validBefore,
+          hasNonce: !!(payloadData.authorization as { nonce?: unknown }).nonce,
+        }
+      : null,
+  };
+
+  console.log(
+    `[Preprocess] Payload shape (redacted):`,
+    JSON.stringify(payloadShape, null, 2)
+  );
+
+  // Check if domain info is missing from requirements.extra
+  const extra = normalizedRequirements.extra as
+    | { name?: string; version?: string; verifyingContract?: string }
+    | undefined;
+
+  if (!extra?.name || !extra?.version) {
+    // Log what's missing for debugging
+    console.log(
+      `[Preprocess] WARNING: Missing EIP-712 domain info in requirements.extra`
+    );
+    console.log(
+      `[Preprocess] extra keys:`,
+      extra ? Object.keys(extra) : "extra is undefined"
+    );
+    console.log(
+      `[Preprocess] This may cause verification to fail with 'missing_eip712_domain'`
+    );
+  }
+
+  return {
+    payload: normalizedPayload,
+    requirements: normalizedRequirements,
+  };
+}
+
+// ============================================================================
 // API Key Validation
 // ============================================================================
 
@@ -229,31 +449,17 @@ export async function createApp() {
       }
 
       try {
-        let { paymentPayload, paymentRequirements } = body as {
+        const { paymentPayload, paymentRequirements } = body as {
           paymentPayload?: PaymentPayload | string;
           paymentRequirements?: PaymentRequirements;
         };
 
         console.log("[Verify] === Payment Verification Request ===");
         console.log(`[Verify] paymentPayload type: ${typeof paymentPayload}`);
-        console.log(`[Verify] paymentRequirements:`, JSON.stringify(paymentRequirements, null, 2));
-        
-        // If paymentPayload is a string (base64), decode it
-        if (typeof paymentPayload === "string") {
-          console.log("[Verify] Decoding base64 payment payload...");
-          try {
-            const decoded = Buffer.from(paymentPayload, "base64").toString("utf-8");
-            console.log(`[Verify] Decoded length: ${decoded.length} chars`);
-            paymentPayload = JSON.parse(decoded) as PaymentPayload;
-            console.log(`[Verify] Parsed payload:`, JSON.stringify(paymentPayload, null, 2));
-          } catch (e) {
-            console.error("[Verify] Failed to decode X-Payment as base64:", e);
-            return status(400, {
-              error: "Invalid paymentPayload",
-              message: "Failed to decode base64 payment payload",
-            });
-          }
-        }
+        console.log(
+          `[Verify] paymentRequirements:`,
+          JSON.stringify(paymentRequirements, null, 2)
+        );
 
         if (!paymentPayload || !paymentRequirements) {
           console.error("[Verify] Missing paymentPayload or paymentRequirements");
@@ -262,24 +468,52 @@ export async function createApp() {
           });
         }
 
-        // Ensure paymentPayload is now an object and default to version 2
-        const originalVersion = (paymentPayload as PaymentPayload).x402Version;
-        const normalizedPayload: PaymentPayload = {
-          ...(paymentPayload as PaymentPayload),
-          x402Version: originalVersion ?? 2,
-        };
-        
-        if (originalVersion === undefined) {
-          console.log(`[Verify] x402Version was undefined, defaulting to 2`);
-        } else {
-          console.log(`[Verify] Using x402Version: ${normalizedPayload.x402Version}`);
+        // Preprocess: normalize network, payload structure, validate guardrails
+        const preprocessed = preprocessVerifyInput(
+          paymentPayload,
+          paymentRequirements
+        );
+
+        if (preprocessed.error) {
+          console.error(`[Verify] Preprocessing error:`, preprocessed.error);
+          return status(preprocessed.error.status, {
+            error: preprocessed.error.error,
+            message: preprocessed.error.message,
+          });
         }
-        console.log(`[Verify] Scheme: ${paymentRequirements.scheme || "unknown"}, Network: ${paymentRequirements.network}`);
+
+        console.log(
+          `[Verify] Preprocessed - Scheme: ${preprocessed.requirements.scheme || "unknown"}, Network: ${preprocessed.requirements.network}`
+        );
+        console.log(
+          `[Verify] Payload x402Version: ${preprocessed.payload.x402Version}`
+        );
+        console.log(
+          `[Verify] Payload has accepted: ${!!preprocessed.payload.accepted}`
+        );
+
+        // Check for missing EIP-712 domain in exact scheme payments
+        const payloadData = preprocessed.payload.payload as any;
+
+        if (
+          preprocessed.requirements.scheme === "exact" &&
+          !payloadData?.domain &&
+          !payloadData?.eip712Domain
+        ) {
+          console.error("[Verify] Missing EIP-712 domain in exact payment payload");
+          console.error("[Verify] Authorization shape:", payloadData?.authorization);
+
+          return status(400, {
+            error: "missing_eip712_domain",
+            message:
+              "Exact EVM payments must include EIP-712 domain. MCP did not provide one.",
+          });
+        }
 
         console.log("[Verify] Calling facilitator.verify()...");
         const response: VerifyResponse = await facilitator.verify(
-          normalizedPayload,
-          paymentRequirements
+          preprocessed.payload,
+          preprocessed.requirements
         );
         
         console.log(`[Verify] Verification result: isValid=${response.isValid}, invalidReason=${response.invalidReason || "none"}`);
@@ -310,31 +544,17 @@ export async function createApp() {
       }
 
       try {
-        let { paymentPayload, paymentRequirements } = body as {
+        const { paymentPayload, paymentRequirements } = body as {
           paymentPayload?: PaymentPayload | string;
           paymentRequirements?: PaymentRequirements;
         };
 
         console.log("[Settle] === Payment Settlement Request ===");
         console.log(`[Settle] paymentPayload type: ${typeof paymentPayload}`);
-        console.log(`[Settle] paymentRequirements:`, JSON.stringify(paymentRequirements, null, 2));
-
-        // If paymentPayload is a string (base64), decode it
-        if (typeof paymentPayload === "string") {
-          console.log("[Settle] Decoding base64 payment payload...");
-          try {
-            const decoded = Buffer.from(paymentPayload, "base64").toString("utf-8");
-            console.log(`[Settle] Decoded length: ${decoded.length} chars`);
-            paymentPayload = JSON.parse(decoded) as PaymentPayload;
-            console.log(`[Settle] Parsed payload:`, JSON.stringify(paymentPayload, null, 2));
-          } catch (e) {
-            console.error("[Settle] Failed to decode X-Payment as base64:", e);
-            return status(400, {
-              error: "Invalid paymentPayload",
-              message: "Failed to decode base64 payment payload",
-            });
-          }
-        }
+        console.log(
+          `[Settle] paymentRequirements:`,
+          JSON.stringify(paymentRequirements, null, 2)
+        );
 
         if (!paymentPayload || !paymentRequirements) {
           console.error("[Settle] Missing paymentPayload or paymentRequirements");
@@ -343,24 +563,52 @@ export async function createApp() {
           });
         }
 
-        // Ensure paymentPayload is now an object and default to version 2
-        const originalVersion = (paymentPayload as PaymentPayload).x402Version;
-        const normalizedPayload: PaymentPayload = {
-          ...(paymentPayload as PaymentPayload),
-          x402Version: originalVersion ?? 2,
-        };
-        
-        if (originalVersion === undefined) {
-          console.log(`[Settle] x402Version was undefined, defaulting to 2`);
-        } else {
-          console.log(`[Settle] Using x402Version: ${normalizedPayload.x402Version}`);
+        // Preprocess: normalize network, payload structure, validate guardrails
+        const preprocessed = preprocessVerifyInput(
+          paymentPayload,
+          paymentRequirements
+        );
+
+        if (preprocessed.error) {
+          console.error(`[Settle] Preprocessing error:`, preprocessed.error);
+          return status(preprocessed.error.status, {
+            error: preprocessed.error.error,
+            message: preprocessed.error.message,
+          });
         }
-        console.log(`[Settle] Scheme: ${paymentRequirements.scheme || "unknown"}, Network: ${paymentRequirements.network}`);
+
+        console.log(
+          `[Settle] Preprocessed - Scheme: ${preprocessed.requirements.scheme || "unknown"}, Network: ${preprocessed.requirements.network}`
+        );
+        console.log(
+          `[Settle] Payload x402Version: ${preprocessed.payload.x402Version}`
+        );
+        console.log(
+          `[Settle] Payload has accepted: ${!!preprocessed.payload.accepted}`
+        );
+
+        // Check for missing EIP-712 domain in exact scheme payments
+        const payloadData = preprocessed.payload.payload as any;
+
+        if (
+          preprocessed.requirements.scheme === "exact" &&
+          !payloadData?.domain &&
+          !payloadData?.eip712Domain
+        ) {
+          console.error("[Settle] Missing EIP-712 domain in exact payment payload");
+          console.error("[Settle] Authorization shape:", payloadData?.authorization);
+
+          return status(400, {
+            error: "missing_eip712_domain",
+            message:
+              "Exact EVM payments must include EIP-712 domain. MCP did not provide one.",
+          });
+        }
 
         console.log("[Settle] Calling facilitator.settle()...");
         const response: SettleResponse = await facilitator.settle(
-          normalizedPayload,
-          paymentRequirements
+          preprocessed.payload,
+          preprocessed.requirements
         );
         
         console.log(`[Settle] Settlement result: success=${response.success}, errorReason=${response.errorReason || "none"}`);
