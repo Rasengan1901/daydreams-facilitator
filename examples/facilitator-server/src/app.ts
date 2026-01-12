@@ -237,28 +237,73 @@ function preprocessVerifyInput(
     JSON.stringify(payloadShape, null, 2)
   );
 
-  // Check if domain info is missing from requirements.extra
-  const extra = normalizedRequirements.extra as
-    | { name?: string; version?: string; verifyingContract?: string }
+  // Step 6: Extract domain info from payload if missing in requirements.extra
+  // The facilitator expects domain info in requirements.extra, but MCP may provide it in payload.domain/eip712Domain
+  let finalRequirements = normalizedRequirements;
+  const currentExtra = normalizedRequirements.extra as
+    | { name?: string; version?: string; verifyingContract?: string; [key: string]: unknown }
     | undefined;
 
-  if (!extra?.name || !extra?.version) {
-    // Log what's missing for debugging
-    console.log(
-      `[Preprocess] WARNING: Missing EIP-712 domain info in requirements.extra`
-    );
-    console.log(
-      `[Preprocess] extra keys:`,
-      extra ? Object.keys(extra) : "extra is undefined"
-    );
-    console.log(
-      `[Preprocess] This may cause verification to fail with 'missing_eip712_domain'`
-    );
+  // Check if domain info is missing from requirements.extra
+  if (!currentExtra?.name || !currentExtra?.version) {
+    // Try to extract from payload.domain or payload.eip712Domain
+    const payloadDataAny = normalizedPayload.payload as Record<string, unknown> | undefined;
+    const payloadDomain = payloadDataAny?.domain || payloadDataAny?.eip712Domain;
+    
+    if (payloadDomain && typeof payloadDomain === "object") {
+      const domain = payloadDomain as {
+        name?: string;
+        version?: string;
+        verifyingContract?: string;
+        chainId?: number | string;
+      };
+
+      if (domain.name && domain.version) {
+        console.log(
+          `[Preprocess] Extracting EIP-712 domain from payload: name="${domain.name}", version="${domain.version}"`
+        );
+
+        // Merge domain info into requirements.extra
+        finalRequirements = {
+          ...normalizedRequirements,
+          extra: {
+            ...(currentExtra || {}),
+            name: domain.name,
+            version: domain.version,
+            verifyingContract: domain.verifyingContract || currentExtra?.verifyingContract || normalizedRequirements.asset,
+          },
+        };
+
+        console.log(
+          `[Preprocess] Injected domain info into requirements.extra`
+        );
+      } else {
+        console.log(
+          `[Preprocess] WARNING: Payload has domain object but missing name or version`
+        );
+        console.log(`[Preprocess] Domain keys:`, Object.keys(domain));
+      }
+    } else {
+      // Log what's missing for debugging
+      console.log(
+        `[Preprocess] WARNING: Missing EIP-712 domain info in requirements.extra and payload`
+      );
+      console.log(
+        `[Preprocess] extra keys:`,
+        currentExtra ? Object.keys(currentExtra) : "extra is undefined"
+      );
+      console.log(
+        `[Preprocess] Payload has domain: ${!!payloadDataAny?.domain}, eip712Domain: ${!!payloadDataAny?.eip712Domain}`
+      );
+      console.log(
+        `[Preprocess] This may cause verification to fail with 'missing_eip712_domain'`
+      );
+    }
   }
 
   return {
     payload: normalizedPayload,
-    requirements: normalizedRequirements,
+    requirements: finalRequirements,
   };
 }
 
