@@ -14,6 +14,7 @@ import { CdpClient } from "@coinbase/cdp-sdk";
 import {
   createFacilitator,
   type FacilitatorConfig,
+  type EvmSchemeType,
 } from "@daydreamsai/facilitator";
 import {
   createCdpEvmSigner,
@@ -94,8 +95,11 @@ async function createDefaultSigners(): Promise<{
 
     const evmSigners: EvmSignerConfig[] = [];
 
+    console.log(`[Setup] Creating ${networkSetups.length} EVM signer(s) for CDP`);
+    
     // Create a signer for each configured network
     for (const network of networkSetups) {
+      console.log(`[Setup] Creating CDP signer for network: ${network.name} (${network.caip})`);
       const signer = createCdpEvmSigner({
         cdpClient: cdp,
         account,
@@ -103,58 +107,71 @@ async function createDefaultSigners(): Promise<{
         rpcUrl: network.rpcUrl,
       });
 
-      evmSigners.push({
+      const signerConfig = {
         signer,
         networks: network.caip as NetworkId,
-        schemes: ["exact", "upto"],
+        schemes: ["exact", "upto"] as EvmSchemeType[],
         deployERC4337WithEIP6492: true,
-        // Enable v1 for networks that support it
-        registerV1: true,
-        v1NetworkNames: "base",
-      });
+        // Note: v1 registration removed - only v2 is supported
+        registerV1: false,
+      };
+      
+      console.log(`[Setup] Signer config: networks=${network.caip}, schemes=exact,upto, deployERC4337WithEIP6492=true`);
+      evmSigners.push(signerConfig);
     }
 
     // CDP doesn't support SVM yet, use private key signer if available
     const svmSigners: SvmSignerConfig[] = [];
     if (SVM_PRIVATE_KEY) {
+      console.log("[Setup] Creating SVM signer from private key");
       const svmSigner = await createPrivateKeySvmSigner();
       // Register for each configured SVM network
       const svmNetworkSetups = getSvmNetworkSetups();
+      console.log(`[Setup] Registering SVM signer for ${svmNetworkSetups.length} network(s)`);
       for (const network of svmNetworkSetups) {
+        console.log(`[Setup] SVM network: ${network.name} (${network.caip})`);
         svmSigners.push({
           signer: svmSigner,
           networks: network.caip as NetworkId,
         });
       }
+    } else {
+      console.log("[Setup] No SVM_PRIVATE_KEY configured, skipping SVM signers");
     }
 
     return { evmSigners, svmSigners, starknetConfigs };
   } else {
     // Private Key Signer (fallback)
+    console.log("[Setup] Using private key signer (fallback)");
     const evmSigners: EvmSignerConfig[] = [];
 
+    console.log(`[Setup] Creating ${networkSetups.length} EVM signer(s) from private key`);
+    
     // Create a signer for each configured network
     for (const network of networkSetups) {
       const rpcUrl = getRpcUrl(network.name);
       if (!rpcUrl) {
-        console.warn(`⚠️  No RPC URL for ${network.name} - skipping`);
+        console.warn(`[Setup] ⚠️  No RPC URL for ${network.name} - skipping`);
         continue;
       }
 
+      console.log(`[Setup] Creating private key signer for network: ${network.name} (${network.caip})`);
       const signer = createPrivateKeyEvmSigner({
         network: network.name,
         rpcUrl,
       });
 
-      evmSigners.push({
+      const signerConfig = {
         signer,
         networks: network.caip as NetworkId,
-        schemes: ["exact", "upto"],
+        schemes: ["exact", "upto"] as EvmSchemeType[],
         deployERC4337WithEIP6492: true,
-        // Enable v1 for networks that support it
-        registerV1: network.supportsV1,
-        v1NetworkNames: network.supportsV1 ? network.name : undefined,
-      });
+        // Note: v1 registration removed - only v2 is supported
+        registerV1: false,
+      };
+      
+      console.log(`[Setup] Signer config: networks=${network.caip}, schemes=exact,upto, deployERC4337WithEIP6492=true`);
+      evmSigners.push(signerConfig);
     }
 
     const svmSigners: SvmSignerConfig[] = [];

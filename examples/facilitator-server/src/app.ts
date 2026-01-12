@@ -94,9 +94,16 @@ export async function createApp() {
   const sessionStore = await createSessionStore();
 
   // Create the facilitator (v1 scheme registration is handled by the factory)
+  console.log("[App] Creating facilitator with default signers...");
+  console.log(`[App] EVM signers: ${defaultSigners.evmSigners?.length ?? 0}`);
+  console.log(`[App] SVM signers: ${defaultSigners.svmSigners?.length ?? 0}`);
+  console.log(`[App] Starknet configs: ${defaultSigners.starknetConfigs?.length ?? 0}`);
+  
   const facilitator = createFacilitator({
     ...defaultSigners,
   });
+  
+  console.log("[App] Facilitator created successfully");
 
   // Create the upto module with the session store
   const upto = createUptoModule({
@@ -227,44 +234,56 @@ export async function createApp() {
           paymentRequirements?: PaymentRequirements;
         };
 
-        // Debug logging for payment payload
-        console.log("=== X-Payment Debug ===");
-        console.log("paymentPayload type:", typeof paymentPayload);
-        console.log("paymentRequirements:", JSON.stringify(paymentRequirements, null, 2));
+        console.log("[Verify] === Payment Verification Request ===");
+        console.log(`[Verify] paymentPayload type: ${typeof paymentPayload}`);
+        console.log(`[Verify] paymentRequirements:`, JSON.stringify(paymentRequirements, null, 2));
         
         // If paymentPayload is a string (base64), decode it
         if (typeof paymentPayload === "string") {
+          console.log("[Verify] Decoding base64 payment payload...");
           try {
             const decoded = Buffer.from(paymentPayload, "base64").toString("utf-8");
-            console.log("Raw decoded (base64):", decoded);
+            console.log(`[Verify] Decoded length: ${decoded.length} chars`);
             paymentPayload = JSON.parse(decoded) as PaymentPayload;
-            console.log("Parsed structure:", JSON.stringify(paymentPayload, null, 2));
+            console.log(`[Verify] Parsed payload:`, JSON.stringify(paymentPayload, null, 2));
           } catch (e) {
-            console.log("Failed to decode X-Payment as base64:", e);
+            console.error("[Verify] Failed to decode X-Payment as base64:", e);
             return status(400, {
               error: "Invalid paymentPayload",
               message: "Failed to decode base64 payment payload",
             });
           }
         }
-        console.log("=== End Debug ===");
 
         if (!paymentPayload || !paymentRequirements) {
+          console.error("[Verify] Missing paymentPayload or paymentRequirements");
           return status(400, {
             error: "Missing paymentPayload or paymentRequirements",
           });
         }
 
         // Ensure paymentPayload is now an object and default to version 2
+        const originalVersion = (paymentPayload as PaymentPayload).x402Version;
         const normalizedPayload: PaymentPayload = {
           ...(paymentPayload as PaymentPayload),
-          x402Version: (paymentPayload as PaymentPayload).x402Version ?? 2,
+          x402Version: originalVersion ?? 2,
         };
+        
+        if (originalVersion === undefined) {
+          console.log(`[Verify] x402Version was undefined, defaulting to 2`);
+        } else {
+          console.log(`[Verify] Using x402Version: ${normalizedPayload.x402Version}`);
+        }
+        console.log(`[Verify] Scheme: ${paymentRequirements.scheme || "unknown"}, Network: ${paymentRequirements.network}`);
 
+        console.log("[Verify] Calling facilitator.verify()...");
         const response: VerifyResponse = await facilitator.verify(
           normalizedPayload,
           paymentRequirements
         );
+        
+        console.log(`[Verify] Verification result: isValid=${response.isValid}, invalidReason=${response.invalidReason || "none"}`);
+        console.log("[Verify] === End Verification ===");
 
         return response;
       } catch (error) {
@@ -296,14 +315,20 @@ export async function createApp() {
           paymentRequirements?: PaymentRequirements;
         };
 
+        console.log("[Settle] === Payment Settlement Request ===");
+        console.log(`[Settle] paymentPayload type: ${typeof paymentPayload}`);
+        console.log(`[Settle] paymentRequirements:`, JSON.stringify(paymentRequirements, null, 2));
+
         // If paymentPayload is a string (base64), decode it
         if (typeof paymentPayload === "string") {
+          console.log("[Settle] Decoding base64 payment payload...");
           try {
             const decoded = Buffer.from(paymentPayload, "base64").toString("utf-8");
-            console.log("[Settle] Decoded base64 payload:", decoded);
+            console.log(`[Settle] Decoded length: ${decoded.length} chars`);
             paymentPayload = JSON.parse(decoded) as PaymentPayload;
+            console.log(`[Settle] Parsed payload:`, JSON.stringify(paymentPayload, null, 2));
           } catch (e) {
-            console.log("[Settle] Failed to decode X-Payment as base64:", e);
+            console.error("[Settle] Failed to decode X-Payment as base64:", e);
             return status(400, {
               error: "Invalid paymentPayload",
               message: "Failed to decode base64 payment payload",
@@ -312,21 +337,34 @@ export async function createApp() {
         }
 
         if (!paymentPayload || !paymentRequirements) {
+          console.error("[Settle] Missing paymentPayload or paymentRequirements");
           return status(400, {
             error: "Missing paymentPayload or paymentRequirements",
           });
         }
 
         // Ensure paymentPayload is now an object and default to version 2
+        const originalVersion = (paymentPayload as PaymentPayload).x402Version;
         const normalizedPayload: PaymentPayload = {
           ...(paymentPayload as PaymentPayload),
-          x402Version: (paymentPayload as PaymentPayload).x402Version ?? 2,
+          x402Version: originalVersion ?? 2,
         };
+        
+        if (originalVersion === undefined) {
+          console.log(`[Settle] x402Version was undefined, defaulting to 2`);
+        } else {
+          console.log(`[Settle] Using x402Version: ${normalizedPayload.x402Version}`);
+        }
+        console.log(`[Settle] Scheme: ${paymentRequirements.scheme || "unknown"}, Network: ${paymentRequirements.network}`);
 
+        console.log("[Settle] Calling facilitator.settle()...");
         const response: SettleResponse = await facilitator.settle(
           normalizedPayload,
           paymentRequirements
         );
+        
+        console.log(`[Settle] Settlement result: success=${response.success}, errorReason=${response.errorReason || "none"}`);
+        console.log("[Settle] === End Settlement ===");
 
         return response;
       } catch (error) {

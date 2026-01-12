@@ -103,34 +103,56 @@ export interface FacilitatorConfig {
  * ```
  */
 export function createFacilitator(config: FacilitatorConfig): x402Facilitator {
+  console.log("[Factory] Creating facilitator...");
   const facilitator = new x402Facilitator();
 
   // Register lifecycle hooks
-  if (config.hooks?.onBeforeVerify) {
-    facilitator.onBeforeVerify(config.hooks.onBeforeVerify);
-  }
-  if (config.hooks?.onAfterVerify) {
-    facilitator.onAfterVerify(config.hooks.onAfterVerify);
-  }
-  if (config.hooks?.onVerifyFailure) {
-    facilitator.onVerifyFailure(config.hooks.onVerifyFailure);
-  }
-  if (config.hooks?.onBeforeSettle) {
-    facilitator.onBeforeSettle(config.hooks.onBeforeSettle);
-  }
-  if (config.hooks?.onAfterSettle) {
-    facilitator.onAfterSettle(config.hooks.onAfterSettle);
-  }
-  if (config.hooks?.onSettleFailure) {
-    facilitator.onSettleFailure(config.hooks.onSettleFailure);
+  const hookCount = [
+    config.hooks?.onBeforeVerify,
+    config.hooks?.onAfterVerify,
+    config.hooks?.onVerifyFailure,
+    config.hooks?.onBeforeSettle,
+    config.hooks?.onAfterSettle,
+    config.hooks?.onSettleFailure,
+  ].filter(Boolean).length;
+  
+  if (hookCount > 0) {
+    console.log(`[Factory] Registering ${hookCount} lifecycle hooks`);
+    if (config.hooks?.onBeforeVerify) {
+      facilitator.onBeforeVerify(config.hooks.onBeforeVerify);
+    }
+    if (config.hooks?.onAfterVerify) {
+      facilitator.onAfterVerify(config.hooks.onAfterVerify);
+    }
+    if (config.hooks?.onVerifyFailure) {
+      facilitator.onVerifyFailure(config.hooks.onVerifyFailure);
+    }
+    if (config.hooks?.onBeforeSettle) {
+      facilitator.onBeforeSettle(config.hooks.onBeforeSettle);
+    }
+    if (config.hooks?.onAfterSettle) {
+      facilitator.onAfterSettle(config.hooks.onAfterSettle);
+    }
+    if (config.hooks?.onSettleFailure) {
+      facilitator.onSettleFailure(config.hooks.onSettleFailure);
+    }
   }
 
   // Register EVM signers and their schemes
+  const evmSignerCount = config.evmSigners?.length ?? 0;
+  console.log(`[Factory] Registering ${evmSignerCount} EVM signer(s)`);
+  
   for (const evmConfig of config.evmSigners ?? []) {
     const schemes = evmConfig.schemes ?? ["exact", "upto"];
+    const networks = Array.isArray(evmConfig.networks) 
+      ? evmConfig.networks 
+      : [evmConfig.networks];
+    
+    console.log(`[Factory] EVM signer: networks=${networks.join(", ")}, schemes=${schemes.join(", ")}`);
 
     if (schemes.includes("exact")) {
       // Register v2 scheme
+      console.log(`[Factory] Registering ExactEvmScheme (v2) for networks: ${networks.join(", ")}`);
       facilitator.register(
         evmConfig.networks,
         new ExactEvmScheme(evmConfig.signer, {
@@ -140,6 +162,7 @@ export function createFacilitator(config: FacilitatorConfig): x402Facilitator {
     }
 
     if (schemes.includes("upto")) {
+      console.log(`[Factory] Registering UptoEvmScheme for networks: ${networks.join(", ")}`);
       registerUptoEvmScheme(facilitator, {
         signer: evmConfig.signer,
         networks: evmConfig.networks,
@@ -148,24 +171,40 @@ export function createFacilitator(config: FacilitatorConfig): x402Facilitator {
   }
 
   // Register SVM signers and their schemes
-  for (const svmConfig of config.svmSigners ?? []) {
-    const schemes = svmConfig.schemes ?? ["exact"];
+  const svmSignerCount = config.svmSigners?.length ?? 0;
+  if (svmSignerCount > 0) {
+    console.log(`[Factory] Registering ${svmSignerCount} SVM signer(s)`);
+    for (const svmConfig of config.svmSigners ?? []) {
+      const schemes = svmConfig.schemes ?? ["exact"];
+      const networks = Array.isArray(svmConfig.networks) 
+        ? svmConfig.networks 
+        : [svmConfig.networks];
+      
+      console.log(`[Factory] SVM signer: networks=${networks.join(", ")}, schemes=${schemes.join(", ")}`);
 
-    if (schemes.includes("exact")) {
-      registerExactSvmScheme(facilitator, {
-        signer: svmConfig.signer,
-        networks: svmConfig.networks,
-      });
+      if (schemes.includes("exact")) {
+        console.log(`[Factory] Registering ExactSvmScheme for networks: ${networks.join(", ")}`);
+        registerExactSvmScheme(facilitator, {
+          signer: svmConfig.signer,
+          networks: svmConfig.networks,
+        });
+      }
     }
   }
 
   // Register Starknet schemes
-  for (const starknetConfig of config.starknetConfigs ?? []) {
-    facilitator.register(
-      starknetConfig.network,
-      new ExactStarknetScheme(starknetConfig)
-    );
+  const starknetCount = config.starknetConfigs?.length ?? 0;
+  if (starknetCount > 0) {
+    console.log(`[Factory] Registering ${starknetCount} Starknet config(s)`);
+    for (const starknetConfig of config.starknetConfigs ?? []) {
+      console.log(`[Factory] Registering ExactStarknetScheme for network: ${starknetConfig.network}`);
+      facilitator.register(
+        starknetConfig.network,
+        new ExactStarknetScheme(starknetConfig)
+      );
+    }
   }
 
+  console.log("[Factory] Facilitator creation complete");
   return facilitator;
 }
