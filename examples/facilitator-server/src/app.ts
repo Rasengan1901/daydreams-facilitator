@@ -227,6 +227,42 @@ export async function createApp() {
           paymentRequirements?: PaymentRequirements;
         };
 
+        // Debug logging for payment payload
+        console.log("=== X-Payment Debug ===");
+        console.log("paymentPayload type:", typeof paymentPayload);
+        console.log("paymentPayload:", JSON.stringify(paymentPayload, null, 2));
+        console.log("paymentRequirements:", JSON.stringify(paymentRequirements, null, 2));
+        
+        // If paymentPayload is a string (base64), try to decode it
+        if (typeof paymentPayload === "string") {
+          try {
+            const decoded = Buffer.from(paymentPayload, "base64").toString("utf-8");
+            console.log("Raw decoded (base64):", decoded);
+            const parsed = JSON.parse(decoded);
+            console.log("Parsed structure:", JSON.stringify(parsed, null, 2));
+          } catch (e) {
+            console.log("Failed to decode X-Payment as base64:", e);
+          }
+        }
+        
+        // Also check if there's a nested payload that's base64 encoded
+        if (paymentPayload && typeof paymentPayload === "object" && "payload" in paymentPayload) {
+          const innerPayload = (paymentPayload as Record<string, unknown>).payload;
+          if (typeof innerPayload === "string") {
+            try {
+              const decoded = Buffer.from(innerPayload, "base64").toString("utf-8");
+              console.log("Inner payload decoded (base64):", decoded);
+              const parsed = JSON.parse(decoded);
+              console.log("Inner parsed structure:", JSON.stringify(parsed, null, 2));
+            } catch (e) {
+              console.log("Failed to decode inner payload as base64:", e);
+            }
+          } else {
+            console.log("Inner payload (not string):", JSON.stringify(innerPayload, null, 2));
+          }
+        }
+        console.log("=== End Debug ===");
+
         if (!paymentPayload || !paymentRequirements) {
           return status(400, {
             error: "Missing paymentPayload or paymentRequirements",
