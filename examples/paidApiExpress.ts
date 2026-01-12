@@ -86,7 +86,7 @@ createExpressPaidRoutes(app, {
     paywallProvider,
     paywallConfig: {
       appName: "Paid API Example (Express)",
-      testnet: true,
+      testnet: false,
     },
   },
 })

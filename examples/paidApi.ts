@@ -90,7 +90,7 @@ createElysiaPaidRoutes(app, {
     paywallProvider,
     paywallConfig: {
       appName: "Paid API Example",
-      testnet: true,
+      testnet: false,
     },
   },
 })

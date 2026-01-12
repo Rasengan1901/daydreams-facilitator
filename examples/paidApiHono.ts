@@ -85,7 +85,7 @@ createHonoPaidRoutes(app, {
     paywallProvider,
     paywallConfig: {
       appName: "Paid API Example (Hono)",
-      testnet: true,
+      testnet: false,
     },
   },
 })

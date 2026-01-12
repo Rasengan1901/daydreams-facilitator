@@ -72,9 +72,9 @@ if (!STARKNET_PAY_TO || !STARKNET_NETWORK || !STARKNET_LEGACY_NETWORK) {
   process.exit(1);
 }
 
-const evmRpcUrl = getRpcUrl("base-sepolia") ?? "https://sepolia.base.org";
+const evmRpcUrl = getRpcUrl("base") ?? "https://mainnet.base.org";
 const evmSigner = createPrivateKeyEvmSigner({
-  network: "base-sepolia",
+  network: "base",
   rpcUrl: evmRpcUrl,
 });
 const [evmAddress] = evmSigner.getAddresses();
@@ -117,7 +117,7 @@ createElysiaPaidRoutes(app, {
     paywallProvider,
     paywallConfig: {
       appName: "Paid API (Multi-Chain)",
-      testnet: true,
+      testnet: false,
     },
   },
 }).get("/premium-all", () => ({ message: "premium content (multi-chain)" }), {
@@ -125,7 +125,7 @@ createElysiaPaidRoutes(app, {
     accepts: [
       {
         scheme: "exact",
-        network: "eip155:84532",
+        network: "eip155:8453",
         payTo: evmAddress,
         price: "$0.01",
       },
