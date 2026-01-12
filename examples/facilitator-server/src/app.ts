@@ -262,6 +262,12 @@ function preprocessVerifyInput(
         console.log(
           `[Preprocess] Extracting EIP-712 domain from payload: name="${domain.name}", version="${domain.version}"`
         );
+        console.log(
+          `[Preprocess] Domain verifyingContract: ${domain.verifyingContract || "using asset address"}`
+        );
+        console.log(
+          `[Preprocess] Domain chainId: ${domain.chainId || "not specified"}`
+        );
 
         // Merge domain info into requirements.extra
         finalRequirements = {
@@ -271,11 +277,13 @@ function preprocessVerifyInput(
             name: domain.name,
             version: domain.version,
             verifyingContract: domain.verifyingContract || currentExtra?.verifyingContract || normalizedRequirements.asset,
+            chainId: domain.chainId || currentExtra?.chainId || normalizedRequirements.network.split(":")[1],
           },
         };
 
         console.log(
-          `[Preprocess] Injected domain info into requirements.extra`
+          `[Preprocess] Injected domain info into requirements.extra:`,
+          JSON.stringify(finalRequirements.extra, null, 2)
         );
       } else {
         console.log(
