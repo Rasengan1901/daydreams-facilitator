@@ -109,8 +109,8 @@ async function createDefaultSigners(): Promise<{
         schemes: ["exact", "upto"],
         deployERC4337WithEIP6492: true,
         // Enable v1 for networks that support it
-        registerV1: network.supportsV1,
-        v1NetworkNames: network.supportsV1 ? network.name : undefined,
+        registerV1: true,
+        v1NetworkNames: "base",
       });
     }
 
