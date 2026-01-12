@@ -9,8 +9,6 @@ import type { FacilitatorEvmSigner } from "@x402/evm";
 import type { FacilitatorSvmSigner } from "@x402/svm";
 import { x402Facilitator } from "@x402/core/facilitator";
 import { ExactEvmScheme } from "@x402/evm/exact/facilitator";
-import { ExactEvmSchemeV1 } from "@x402/evm/exact/v1/facilitator";
-import { NETWORKS as V1_NETWORKS } from "@x402/evm/v1";
 import { registerExactSvmScheme } from "@x402/svm/exact/facilitator";
 
 import { ExactStarknetScheme } from "./starknet/exact/facilitator.js";
@@ -130,7 +128,6 @@ export function createFacilitator(config: FacilitatorConfig): x402Facilitator {
   // Register EVM signers and their schemes
   for (const evmConfig of config.evmSigners ?? []) {
     const schemes = evmConfig.schemes ?? ["exact", "upto"];
-    const registerV1 = evmConfig.registerV1 ?? true;
 
     if (schemes.includes("exact")) {
       // Register v2 scheme
@@ -140,29 +137,6 @@ export function createFacilitator(config: FacilitatorConfig): x402Facilitator {
           deployERC4337WithEIP6492: evmConfig.deployERC4337WithEIP6492,
         })
       );
-
-      // Register v1 scheme for backwards compatibility
-      if (registerV1 && evmConfig.v1NetworkNames) {
-        const v1Names = Array.isArray(evmConfig.v1NetworkNames)
-          ? evmConfig.v1NetworkNames
-          : [evmConfig.v1NetworkNames];
-
-        // Filter to only networks that @x402/evm supports for v1
-        const supportedV1Names = v1Names.filter((name) =>
-          V1_NETWORKS.includes(name)
-        );
-
-        if (supportedV1Names.length > 0) {
-          // V1 uses network names (e.g., "base") not CAIP IDs
-          // IMPORTANT: Use registerV1() not register() for v1 schemes
-          facilitator.registerV1(
-            supportedV1Names as NetworkId[],
-            new ExactEvmSchemeV1(evmConfig.signer, {
-              deployERC4337WithEIP6492: evmConfig.deployERC4337WithEIP6492,
-            })
-          );
-        }
-      }
     }
 
     if (schemes.includes("upto")) {

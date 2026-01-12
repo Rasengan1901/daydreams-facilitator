@@ -255,8 +255,11 @@ export async function createApp() {
           });
         }
 
-        // Ensure paymentPayload is now an object
-        const normalizedPayload: PaymentPayload = paymentPayload as PaymentPayload;
+        // Ensure paymentPayload is now an object and default to version 2
+        const normalizedPayload: PaymentPayload = {
+          ...(paymentPayload as PaymentPayload),
+          x402Version: (paymentPayload as PaymentPayload).x402Version ?? 2,
+        };
 
         const response: VerifyResponse = await facilitator.verify(
           normalizedPayload,
@@ -314,8 +317,11 @@ export async function createApp() {
           });
         }
 
-        // Ensure paymentPayload is now an object
-        const normalizedPayload: PaymentPayload = paymentPayload as PaymentPayload;
+        // Ensure paymentPayload is now an object and default to version 2
+        const normalizedPayload: PaymentPayload = {
+          ...(paymentPayload as PaymentPayload),
+          x402Version: (paymentPayload as PaymentPayload).x402Version ?? 2,
+        };
 
         const response: SettleResponse = await facilitator.settle(
           normalizedPayload,
