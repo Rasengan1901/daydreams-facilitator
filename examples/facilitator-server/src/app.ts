@@ -570,6 +570,57 @@ export async function createApp() {
         );
         
         console.log(`[Verify] Verification result: isValid=${response.isValid}, invalidReason=${response.invalidReason || "none"}`);
+
+        // Auto-settle for exact scheme payments after successful verification
+        if (
+          response.isValid &&
+          preprocessed.requirements.scheme === "exact"
+        ) {
+          console.log("[Verify] Auto-settling exact payment...");
+          try {
+            const settleResponse: SettleResponse = await facilitator.settle(
+              preprocessed.payload,
+              preprocessed.requirements
+            );
+            
+            console.log(`[Verify] Settlement result: success=${settleResponse.success}, tx=${settleResponse.transaction || "none"}`);
+            
+            if (!settleResponse.success) {
+              console.error(`[Verify] Settlement failed: ${settleResponse.errorReason}`);
+              // Return verification success but include settlement info
+              return {
+                ...response,
+                settlement: {
+                  success: false,
+                  errorReason: settleResponse.errorReason,
+                },
+              };
+            }
+            
+            console.log("[Verify] === End Verification + Settlement ===");
+            
+            // Return combined response with settlement info
+            return {
+              ...response,
+              settlement: {
+                success: true,
+                transaction: settleResponse.transaction,
+                network: settleResponse.network,
+              },
+            };
+          } catch (settleError) {
+            console.error("[Verify] Settlement error:", settleError);
+            // Return verification success but note settlement failure
+            return {
+              ...response,
+              settlement: {
+                success: false,
+                errorReason: settleError instanceof Error ? settleError.message : "settlement_failed",
+              },
+            };
+          }
+        }
+
         console.log("[Verify] === End Verification ===");
 
         return response;
