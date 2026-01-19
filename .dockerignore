@@ -1,0 +1,46 @@
+# Dependencies (will be installed fresh in Docker)
+node_modules
+**/node_modules
+
+# Build outputs (will be built fresh)
+dist
+**/dist
+
+# Git
+.git
+.gitignore
+
+# IDE and editor config
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage
+.nyc_output
+
+# Environment files (use Docker env vars instead)
+.env
+.env.*
+!.env.example
+
+# Development files
+.changeset
+.context
+.claude
+thoughts
+
+# Documentation
+*.md
+!README.md
+
+# Test files (not needed in production image)
+tests
+**/*.test.ts
+**/*.spec.ts

@@ -43,20 +43,62 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Build packages
         run: cd packages/core && bun run build
 
-      - name: Typecheck core
-        run: cd packages/core && bun run typecheck
+      - name: Typecheck all packages
+        run: |
+          (cd packages/core && bun run typecheck) & pid1=$!
+          (cd examples && npx tsc --noEmit) & pid2=$!
+          (cd examples/facilitator-server && bun run typecheck) & pid3=$!
+          wait $pid1 $pid2 $pid3
 
-      - name: Typecheck examples
-        run: cd examples && npx tsc --noEmit
+      - name: Run tests with coverage
+        run: cd packages/core && bun test --coverage
 
-      - name: Typecheck facilitator-server
-        run: cd examples/facilitator-server && bun run typecheck
+  docker_build:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    # Run in parallel with quality_checks for faster feedback
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Run tests
-        run: cd packages/core && bun test
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: examples/facilitator-server/Dockerfile
+          push: false
+          load: true
+          tags: facilitator:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker image starts
+        # Uses well-known test private key (0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf)
+        # This is intentionally a publicly known key for CI testing - never use with real funds
+        run: |
+          docker run -d --name test-facilitator \
+            -e EVM_PRIVATE_KEY=0x0000000000000000000000000000000000000000000000000000000000000001 \
+            -e EVM_NETWORKS=base-sepolia \
+            -p 8090:8090 \
+            facilitator:test
+          sleep 5
+          curl -f http://localhost:8090/supported || exit 1
+          docker stop test-facilitator
+          docker rm test-facilitator

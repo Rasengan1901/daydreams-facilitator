@@ -1,11 +1,11 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, mock } from "bun:test";
 import { createUptoModule } from "../../src/upto/module.js";
 import { InMemoryUptoSessionStore } from "../../src/upto/store.js";
 import type { UptoFacilitatorClient } from "../../src/upto/settlement.js";
 
 describe("createUptoModule", () => {
   const facilitatorClient = {
-    settle: vi.fn(),
+    settle: mock(() => Promise.resolve()),
   } as unknown as UptoFacilitatorClient;
 
   it("does not create a sweeper by default", () => {
