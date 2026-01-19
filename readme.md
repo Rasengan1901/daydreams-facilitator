@@ -9,6 +9,7 @@ A production-ready payment settlement service for the [x402 protocol](https://gi
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
+  - [One-Click Deploy (Railway)](#one-click-deploy-railway)
 - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
   - [Network Configuration](#network-configuration)
@@ -26,6 +27,7 @@ A production-ready payment settlement service for the [x402 protocol](https://gi
   - [Paywall Support](#paywall-support)
 - [Testing](#testing)
 - [Production Deployment](#production-deployment)
+  - [Railway Deployment](#railway-deployment)
 
 ## Overview
 
@@ -171,6 +173,28 @@ bun dev
 ```bash
 curl http://localhost:8090/supported
 ```
+
+### One-Click Deploy (Railway)
+
+Deploy your own facilitator instance to Railway with one click:
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/TEMPLATE_ID)
+
+> **Note:** Replace `TEMPLATE_ID` with the actual template ID after creating the Railway template.
+
+**Required environment variables (choose one):**
+
+| Mode | Variables |
+|------|-----------|
+| CDP (recommended) | `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET`, `CDP_WALLET_SECRET`, `CDP_ACCOUNT_NAME` |
+| Private Key | `EVM_PRIVATE_KEY` |
+
+**Optional variables:**
+- `EVM_NETWORKS` - Networks to enable (default: `base,base-sepolia`)
+- `ALCHEMY_API_KEY` - For better RPC reliability
+- `SVM_PRIVATE_KEY` + `SVM_NETWORKS` - Enable Solana support
+
+After deployment, verify at `https://your-app.railway.app/supported`.
 
 ### Multi-Chain Paid Endpoint (EVM + Solana + Starknet)
 
@@ -1084,6 +1108,23 @@ services:
       timeout: 10s
       retries: 3
 ```
+
+### Railway Deployment
+
+For quick cloud deployment, use the Railway deploy button in the [Quick Start](#one-click-deploy-railway) section, or follow these manual steps:
+
+1. **Create a Railway template** from this repository at [railway.com](https://railway.com)
+2. **Configure environment variables:**
+   - For CDP: Set `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET`, `CDP_WALLET_SECRET`, `CDP_ACCOUNT_NAME` from your [Coinbase Developer Platform](https://portal.cdp.coinbase.com/) account
+   - For private key: Set `EVM_PRIVATE_KEY` with your hex-formatted private key
+3. **Optional configuration:**
+   - `EVM_NETWORKS` - Comma-separated networks (e.g., `base,optimism,arbitrum`)
+   - `ALCHEMY_API_KEY` - For better RPC reliability
+   - `SVM_NETWORKS` + `SVM_PRIVATE_KEY` - Enable Solana support
+4. **Deploy** and wait for the health check to pass
+5. Your facilitator is live at `https://your-app.railway.app`
+
+The repository includes a `railway.toml` configuration that uses the existing Dockerfile for builds.
 
 ## License
 
