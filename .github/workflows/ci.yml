@@ -58,5 +58,40 @@ jobs:
       - name: Typecheck facilitator-server
         run: cd examples/facilitator-server && bun run typecheck
 
-      - name: Run tests
-        run: cd packages/core && bun test
+      - name: Run tests with coverage
+        run: cd packages/core && bun test --coverage
+
+  docker_build:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    needs: quality_checks
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: examples/facilitator-server/Dockerfile
+          push: false
+          tags: facilitator:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker image starts
+        # Uses well-known test private key (0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf)
+        # This is intentionally a publicly known key for CI testing - never use with real funds
+        run: |
+          docker run -d --name test-facilitator \
+            -e EVM_PRIVATE_KEY=0x0000000000000000000000000000000000000000000000000000000000000001 \
+            -e EVM_NETWORKS=base-sepolia \
+            -p 8090:8090 \
+            facilitator:test
+          sleep 5
+          curl -f http://localhost:8090/supported || exit 1
+          docker stop test-facilitator
+          docker rm test-facilitator
