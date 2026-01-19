@@ -59,10 +59,10 @@ jobs:
 
       - name: Typecheck all packages
         run: |
-          cd packages/core && bun run typecheck &
-          cd examples && npx tsc --noEmit &
-          cd examples/facilitator-server && bun run typecheck &
-          wait
+          (cd packages/core && bun run typecheck) & pid1=$!
+          (cd examples && npx tsc --noEmit) & pid2=$!
+          (cd examples/facilitator-server && bun run typecheck) & pid3=$!
+          wait $pid1 $pid2 $pid3
 
       - name: Run tests with coverage
         run: cd packages/core && bun test --coverage

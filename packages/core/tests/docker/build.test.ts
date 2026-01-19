@@ -6,8 +6,8 @@
  *
  * Run with: DOCKER_TESTS=true bun test tests/docker/
  *
- * Note: These tests use port 18090 for container binding. Ensure this port
- * is available before running.
+ * Note: These tests use ports 18090-18091 for container binding. Ensure these
+ * ports are available before running.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
@@ -24,7 +24,9 @@ const REPO_ROOT = resolve(__dirname, "../../../..");
 
 describe.skipIf(!runDockerTests)("Docker Build", () => {
   const imageName = "facilitator-test:latest";
-  const containerName = "facilitator-test-container";
+  // Unique container names to avoid conflicts if tests run in parallel
+  const healthCheckContainer = "facilitator-test-health";
+  const staticFilesContainer = "facilitator-test-static";
   let buildSucceeded = false;
   let dockerAvailable = false;
 
@@ -54,12 +56,14 @@ describe.skipIf(!runDockerTests)("Docker Build", () => {
   afterAll(async () => {
     if (!dockerAvailable) return;
 
-    // Cleanup container if it exists
-    try {
-      await $`docker stop ${containerName}`.quiet().nothrow();
-      await $`docker rm ${containerName}`.quiet().nothrow();
-    } catch {
-      // Ignore cleanup errors
+    // Cleanup containers if they exist
+    for (const container of [healthCheckContainer, staticFilesContainer]) {
+      try {
+        await $`docker stop ${container}`.quiet().nothrow();
+        await $`docker rm ${container}`.quiet().nothrow();
+      } catch {
+        // Ignore cleanup errors
+      }
     }
 
     // Cleanup image
@@ -109,7 +113,7 @@ describe.skipIf(!runDockerTests)("Docker Build", () => {
 
     try {
       // Start container in background
-      await $`docker run -d --name ${containerName} \
+      await $`docker run -d --name ${healthCheckContainer} \
         -e EVM_PRIVATE_KEY=${testPrivateKey} \
         -e EVM_NETWORKS=base-sepolia \
         -p 18090:8090 \
@@ -126,8 +130,8 @@ describe.skipIf(!runDockerTests)("Docker Build", () => {
       expect(data).toBeDefined();
     } finally {
       // Cleanup
-      await $`docker stop ${containerName}`.quiet().nothrow();
-      await $`docker rm ${containerName}`.quiet().nothrow();
+      await $`docker stop ${healthCheckContainer}`.quiet().nothrow();
+      await $`docker rm ${healthCheckContainer}`.quiet().nothrow();
     }
   });
 
@@ -139,24 +143,24 @@ describe.skipIf(!runDockerTests)("Docker Build", () => {
       "0x0000000000000000000000000000000000000000000000000000000000000001";
 
     try {
-      // Start container
-      await $`docker run -d --name ${containerName} \
+      // Start container on different port to avoid conflicts
+      await $`docker run -d --name ${staticFilesContainer} \
         -e EVM_PRIVATE_KEY=${testPrivateKey} \
         -e EVM_NETWORKS=base-sepolia \
-        -p 18090:8090 \
+        -p 18091:8090 \
         ${imageName}`.quiet();
 
       // Wait for startup
       await Bun.sleep(5000);
 
       // Check root serves index.html
-      const response = await fetch("http://localhost:18090/");
+      const response = await fetch("http://localhost:18091/");
       expect(response.ok).toBe(true);
       const html = await response.text();
       expect(html).toContain("html");
     } finally {
-      await $`docker stop ${containerName}`.quiet().nothrow();
-      await $`docker rm ${containerName}`.quiet().nothrow();
+      await $`docker stop ${staticFilesContainer}`.quiet().nothrow();
+      await $`docker rm ${staticFilesContainer}`.quiet().nothrow();
     }
   });
 });
