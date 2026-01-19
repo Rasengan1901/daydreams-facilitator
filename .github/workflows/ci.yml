@@ -43,20 +43,26 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Build packages
         run: cd packages/core && bun run build
 
-      - name: Typecheck core
-        run: cd packages/core && bun run typecheck
-
-      - name: Typecheck examples
-        run: cd examples && npx tsc --noEmit
-
-      - name: Typecheck facilitator-server
-        run: cd examples/facilitator-server && bun run typecheck
+      - name: Typecheck all packages
+        run: |
+          cd packages/core && bun run typecheck &
+          cd examples && npx tsc --noEmit &
+          cd examples/facilitator-server && bun run typecheck &
+          wait
 
       - name: Run tests with coverage
         run: cd packages/core && bun test --coverage
@@ -64,7 +70,7 @@ jobs:
   docker_build:
     name: Docker Build Test
     runs-on: ubuntu-latest
-    needs: quality_checks
+    # Run in parallel with quality_checks for faster feedback
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -78,6 +84,7 @@ jobs:
           context: .
           file: examples/facilitator-server/Dockerfile
           push: false
+          load: true
           tags: facilitator:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
