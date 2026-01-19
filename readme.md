@@ -178,9 +178,7 @@ curl http://localhost:8090/supported
 
 Deploy your own facilitator instance to Railway with one click:
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/TEMPLATE_ID)
-
-> **Note:** Replace `TEMPLATE_ID` with the actual template ID after creating the Railway template.
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Egob9T?referralCode=6OVVY9)
 
 **Required environment variables (choose one):**
 
