@@ -20,7 +20,7 @@ export interface ExactEvmPaymentParams {
  */
 export function createExactEvmPayment(params: ExactEvmPaymentParams) {
   const { amount, asset, network, payTo, from, validBefore } = params;
-  const nonce = `0x${crypto.randomUUID().replace(/-/g, "")}` as `0x${string}`;
+  const nonce = `0x${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex")}` as `0x${string}`;
   const validBeforeValue = validBefore ?? BigInt(Math.floor(Date.now() / 1000) + 3600);
 
   // Build EIP-712 typed data for exact payment (TransferWithAuthorization)
