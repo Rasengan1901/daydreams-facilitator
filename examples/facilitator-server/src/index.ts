@@ -8,6 +8,7 @@
  * Environment variables:
  * - PORT: Server port (default: 8090)
  * - DATABASE_URL: PostgreSQL connection string (optional, enables Drizzle tracking)
+ * - TRACKING_ALLOW_IN_MEMORY_FALLBACK: set to "true" to continue startup when DB init fails
  * - CDP_API_KEY_ID, CDP_API_KEY_SECRET, CDP_WALLET_SECRET: For CDP signer
  * - EVM_PRIVATE_KEY, SVM_PRIVATE_KEY: For private key signer (fallback)
  * - EVM_RPC_URL_BASE, EVM_RPC_URL_BASE_SEPOLIA: RPC URLs
@@ -16,17 +17,17 @@
  */
 
 import pg from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
 import { defaultSigners } from "./setup.js";
 import { createFacilitator } from "@daydreamsai/facilitator";
 import { createApp } from "./app.js";
 import { createDrizzleAdapter, createTracking } from "./db.js";
 import { runMigrations } from "./db-migrate.js";
 import { createBearerTokenModule } from "./modules/bearer-token.js";
-import * as trackingSchema from "./schema/tracking.js";
 
 const PORT = parseInt(process.env.PORT || "8090", 10);
 const DATABASE_URL = process.env.DATABASE_URL;
+const TRACKING_ALLOW_IN_MEMORY_FALLBACK =
+  process.env.TRACKING_ALLOW_IN_MEMORY_FALLBACK === "true";
 const BEARER_TOKEN = process.env.BEARER_TOKEN?.trim();
 const BEARER_TOKENS = process.env.BEARER_TOKENS?.split(",")
   .map((token) => token.trim())
@@ -47,9 +48,6 @@ if (TOKENS.length === 0) {
 let pool = DATABASE_URL
   ? new pg.Pool({ connectionString: DATABASE_URL })
   : undefined;
-let db = pool
-  ? drizzle(pool, { schema: trackingSchema })
-  : undefined;
 let pgClient = pool ? createDrizzleAdapter(pool) : undefined;
 
 // Run migrations if database is configured
@@ -57,17 +55,30 @@ if (pool) {
   try {
     await runMigrations(pool);
   } catch (err) {
-    console.error(`❌ Database migration failed - falling back to in-memory tracking`);
+    console.error("❌ Database migration failed");
     console.error(err instanceof Error ? err.message : err);
+
+    if (!TRACKING_ALLOW_IN_MEMORY_FALLBACK) {
+      console.error(
+        "Set TRACKING_ALLOW_IN_MEMORY_FALLBACK=true to continue with in-memory tracking."
+      );
+      await pool.end().catch(() => {});
+      process.exit(1);
+    }
+
+    console.error("⚠️ Continuing with in-memory tracking.");
     await pool.end().catch(() => {});
     pool = undefined;
-    db = undefined;
     pgClient = undefined;
   }
 }
 
 // Resource tracking (falls back to in-memory if no DATABASE_URL)
-const tracking = createTracking(pgClient);
+const tracking = createTracking(pgClient, {
+  onTrackingError: (err, id) => {
+    console.error(`[tracking:${id}]`, err);
+  },
+});
 
 // Facilitator + App
 const facilitator = createFacilitator({ ...defaultSigners });
@@ -85,8 +96,12 @@ const app = createApp({
 
 app.listen(PORT);
 console.log(`x402 Facilitator listening on http://localhost:${PORT}`);
-if (DATABASE_URL) {
+if (pgClient) {
   console.log(`Resource tracking: PostgreSQL (Drizzle)`);
+} else if (DATABASE_URL) {
+  console.log(
+    `Resource tracking: In-memory (DB init failed; set TRACKING_ALLOW_IN_MEMORY_FALLBACK=true to allow this explicitly)`
+  );
 } else {
   console.log(`Resource tracking: In-memory (set DATABASE_URL for persistence)`);
 }
