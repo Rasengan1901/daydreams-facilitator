@@ -14,6 +14,7 @@ import type {
 import { logger } from "@bogeychan/elysia-logger";
 import {
   extractPaymentDetails,
+  extractX402AuditFields,
   type ResourceTrackingModule,
   type TrackingContext,
 } from "@daydreamsai/facilitator/tracking";
@@ -196,7 +197,9 @@ export function createApp(config: AppConfig) {
               module.recordVerification(
                 trackingId,
                 true,
-                extractPaymentDetails(paymentPayload, paymentRequirements)
+                extractPaymentDetails(paymentPayload, paymentRequirements),
+                undefined,
+                extractX402AuditFields(paymentPayload, paymentRequirements)
               ),
             `tracking:${trackingId}`
           );
@@ -215,14 +218,24 @@ export function createApp(config: AppConfig) {
         return response;
       } catch (error) {
         console.error("Verify error:", error);
+        const parsedBody = (body ?? {}) as {
+          paymentPayload?: PaymentPayload;
+          paymentRequirements?: PaymentRequirements;
+        };
+        const { paymentPayload, paymentRequirements } = parsedBody;
         if (trackingId) {
           await safeTrack(
             (module) =>
               module.recordVerification(
                 trackingId,
                 false,
-                undefined,
-                error instanceof Error ? error.message : "Unknown error"
+                paymentPayload && paymentRequirements
+                  ? extractPaymentDetails(paymentPayload, paymentRequirements)
+                  : undefined,
+                error instanceof Error ? error.message : "Unknown error",
+                paymentPayload && paymentRequirements
+                  ? extractX402AuditFields(paymentPayload, paymentRequirements)
+                  : undefined
               ),
             `tracking:${trackingId}`
           );
@@ -278,7 +291,9 @@ export function createApp(config: AppConfig) {
               module.recordVerification(
                 trackingId,
                 true,
-                extractPaymentDetails(paymentPayload, paymentRequirements)
+                extractPaymentDetails(paymentPayload, paymentRequirements),
+                undefined,
+                extractX402AuditFields(paymentPayload, paymentRequirements)
               ),
             `tracking:${trackingId}`
           );
@@ -321,10 +336,11 @@ export function createApp(config: AppConfig) {
           error instanceof Error &&
           error.message.includes("Settlement aborted:")
         ) {
-          const { paymentPayload, paymentRequirements } = body as {
+          const parsedBody = (body ?? {}) as {
             paymentPayload?: PaymentPayload;
             paymentRequirements?: PaymentRequirements;
           };
+          const { paymentPayload, paymentRequirements } = parsedBody;
 
           if (trackingId) {
             if (paymentPayload && paymentRequirements) {
@@ -334,7 +350,8 @@ export function createApp(config: AppConfig) {
                     trackingId,
                     false,
                     extractPaymentDetails(paymentPayload, paymentRequirements),
-                    error.message
+                    error.message,
+                    extractX402AuditFields(paymentPayload, paymentRequirements)
                   ),
                 `tracking:${trackingId}`
               );
